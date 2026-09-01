@@ -39,6 +39,12 @@ async function apiFetch(path: string, init: RequestInit) {
 /** Pull fresh data from the server into IndexedDB (full replace for the session). */
 export async function pullFromServer(): Promise<void> {
   try {
+    // Skip if not authenticated (avoid "Non authentifié" console spam on login page)
+    const me = await fetch("/api/auth/me", { cache: "no-store" }).then((r) =>
+      r.ok ? r.json() : null
+    );
+    if (!me?.user) return;
+
     const [invoices, clients, products] = await Promise.all([
       apiFetch("/invoices", { method: "GET" }),
       apiFetch("/clients", { method: "GET" }),
@@ -59,7 +65,7 @@ export async function pullFromServer(): Promise<void> {
       await db.products.bulkPut(products);
     });
   } catch (e) {
-    console.warn("pullFromServer failed:", e);
+    // Silent: expected when offline or unauthenticated
   }
 }
 
@@ -97,7 +103,7 @@ async function processQueueItem(item: SyncQueueItem): Promise<boolean> {
     }
     return true;
   } catch (err) {
-    console.warn(`sync item failed (${entity}/${op}):`, err);
+    // Silent on expected failures (offline/unauthenticated); the queue will retry
     return false;
   }
 }
@@ -123,8 +129,8 @@ export async function flushQueue(): Promise<void> {
     }
     // After flushing, pull fresh canonical data so local store reflects server
     await pullFromServer();
-  } catch (e) {
-    console.warn("flushQueue error:", e);
+  } catch {
+    // Silent: expected when offline
   } finally {
     syncing = false;
     emit(await countPendingSync(), false);
