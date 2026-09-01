@@ -29,6 +29,7 @@ export type ViewId =
   | "invoices"
   | "new-invoice"
   | "invoice-detail"
+  | "clients"
   | "products"
   | "stats"
   | "settings"
@@ -47,6 +48,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: "dashboard", label: "Accueil", icon: LayoutDashboard, minRole: "employee" },
   { id: "invoices", label: "Factures", icon: ReceiptText, minRole: "employee" },
   { id: "new-invoice", label: "Nouvelle", icon: PlusCircle, minRole: "employee" },
+  { id: "clients", label: "Clients", icon: Users, minRole: "employee" },
   { id: "stats", label: "Statistiques", icon: BarChart3, minRole: "employee" },
   { id: "products", label: "Produits", icon: Package, minRole: "employee" },
   { id: "csv-import", label: "Import CSV", icon: Upload, minRole: "employee" },
@@ -132,11 +134,12 @@ export function AppShell({
           document.querySelector<HTMLInputElement>('input[placeholder*="Rechercher"]')?.focus();
         }, 60);
       } else if (e.key === "g") {
-        // "g" then next key: g+d dashboard, g+i invoices, g+s stats, g+p products
+        // "g" then next key: g+d dashboard, g+i invoices, g+c clients, g+s stats, g+p products
         const handler = (ev: KeyboardEvent) => {
           window.removeEventListener("keydown", handler);
           if (ev.key === "d") navigate("dashboard");
           else if (ev.key === "i") navigate("invoices");
+          else if (ev.key === "c" && roleOk("employee")) navigate("clients");
           else if (ev.key === "s" && roleOk("employee")) navigate("stats");
           else if (ev.key === "p" && roleOk("employee")) navigate("products");
         };

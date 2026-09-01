@@ -310,3 +310,56 @@ Task: QA + bug fixes + new features (Dashboard, skeleton loaders, keyboard short
 4. **Bulk status change** in selection mode (currently only bulk delete + CSV export)
 5. **Search across all fields** with highlighting
 6. **Export the invoice list as PDF** (single multi-page PDF of all selected invoices, like the Flutter `shareInvoicesAsPdf`)
+
+---
+Task ID: CRON-ROUND-3
+Agent: main (cron webDevReview)
+Task: Clients management screen + bulk status change + date range filter
+
+## Current project status assessment
+- Project stable after round 2: lint clean, all 8 screens working, sync engine console spam fixed, dashboard + keyboard shortcuts + skeleton loaders added
+- No clients management screen existed (clients were only created implicitly when invoicing) — top priority recommendation from round 2
+- Invoices list lacked bulk status change (only delete + CSV export) and date range filter (Flutter app has DateTimeRange)
+
+## Current goals / completed modifications / verification results
+
+### New feature: Clients management screen
+1. **New file** `src/components/screens/clients-screen.tsx`:
+   - Searchable client grid (1 col mobile, 2 sm, 3 lg) with cards showing avatar initials, name, phone, address, and stats (invoices count + total CA per client)
+   - Add/Edit dialog (`ClientFormDialog`): name (required), phone, address with proper form validation
+   - Delete confirmation (`AlertDialog`) with note that existing invoices keep the client name as free text
+   - Per-client invoice history dialog (`ClientHistoryDialog`): shows stats summary (count + total paid), client phone, and a scrollable list of that client's invoices (clickable → invoice detail)
+   - Client stats computed via `clientStats` Map keyed by lowercase clientName (matches invoices by name)
+2. **Wiring**: added "clients" to `ViewId` + `NAV_ITEMS` in `app-shell.tsx` (between Nouvelle and Statistiques), added `G+C` keyboard shortcut, added case in `view-router.tsx`
+
+### New feature: Bulk status change
+3. **In `invoices-screen.tsx`**:
+   - Added `bulkChangeStatus(status)` handler that iterates selected invoices and calls `saveInvoice` with the new status for each
+   - Added "Statut (N)" button in selection-mode actions (blue accent, DropdownMenu with all 4 statuses + colored dots)
+   - Toast confirms: "N facture(s) → {status label}"
+   - Closes selection mode + refreshes after completion
+
+### New feature: Date range filter
+4. **In `invoices-screen.tsx`**:
+   - Added `dateFrom` / `dateTo` state (string date inputs)
+   - `filtered` useMemo now applies date bounds (from = 00:00:00, to = 23:59:59.999) — deps array updated to include dateFrom/dateTo
+   - New "Période" filter row with two `<Input type="date">` fields + an "Effacer" button (with XCircle icon) that appears when a date is set
+   - Combines with existing status + search filters for powerful filtering
+
+### Verification
+- `bun run lint`: **0 errors, 0 warnings** (after fixing useMemo deps array to include dateFrom/dateTo)
+- Dev log: **0 errors** (clean compile)
+- curl full flow (while server alive): login 200, clients 200 (returns client data), invoices 200, home (dashboard) 200 in ~25s compile
+- agent-browser: still blocked by the sandbox dev-server instability (process exits after first compile), not a code issue
+
+## Unresolved issues / risks
+- **Dev server sandbox instability** persists: `bun run dev` process dies after the first compile cycle. Verified via curl + lint instead.
+- **Client ↔ Invoice link is by name** (text matching), not by `clientId` foreign key. The schema has `clientId` but the new-invoice screen sets it when the client exists; the history dialog matches by lowercase name for robustness. A future migration could enforce the FK relation on all invoices.
+
+## Priority recommendations for next phase
+1. **Invoice templates / branding** — let admin customize PDF colors and footer text (currently hardcoded to "Konté Bussness Services")
+2. **Export invoice list as PDF** — single multi-page PDF of all selected invoices (like Flutter `shareInvoicesAsPdf`)
+3. **Search highlighting** — highlight matching text in invoice cards when searching
+4. **Clients count badge on nav** — show the clients count next to the nav item
+5. **Recurring invoices** — schedule weekly/monthly invoice generation
+6. **Activity log** — track who created/modified/deleted what (audit trail for admin)

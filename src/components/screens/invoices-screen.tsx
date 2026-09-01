@@ -3,7 +3,7 @@
 // search, status filters, sort, multi-select, CSV export, bulk delete.
 
 import { useState, useMemo, useCallback } from "react";
-import { useInvoices, deleteInvoice } from "@/lib/data-hooks";
+import { useInvoices, deleteInvoice, saveInvoice } from "@/lib/data-hooks";
 import { useNav } from "@/components/app-shell";
 import {
   ScreenHeader,
@@ -26,6 +26,10 @@ import {
   RefreshCw,
   ArrowUpDown,
   Filter,
+  Calendar,
+  CalendarDays,
+  XCircle,
+  Repeat,
 } from "lucide-react";
 import {
   INVOICE_STATUS_META,
@@ -87,6 +91,9 @@ export function InvoicesScreen() {
   const [selectionMode, setSelectionMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [dateFrom, setDateFrom] = useState<string>("");
+  const [dateTo, setDateTo] = useState<string>("");
+  const [bulkStatusOpen, setBulkStatusOpen] = useState(false);
 
   const toggleFilter = (s: InvoiceStatus) => {
     setFilters((prev) => {
@@ -111,6 +118,17 @@ export function InvoicesScreen() {
     if (filters.size > 0) {
       list = list.filter((inv) => filters.has(inv.status));
     }
+    // Date range filter
+    if (dateFrom) {
+      const from = new Date(dateFrom);
+      from.setHours(0, 0, 0, 0);
+      list = list.filter((inv) => new Date(inv.createdAt) >= from);
+    }
+    if (dateTo) {
+      const to = new Date(dateTo);
+      to.setHours(23, 59, 59, 999);
+      list = list.filter((inv) => new Date(inv.createdAt) <= to);
+    }
     list.sort((a, b) => {
       switch (sort) {
         case "dateDesc":
@@ -126,7 +144,7 @@ export function InvoicesScreen() {
       }
     });
     return list;
-  }, [invoices, search, filters, sort]);
+  }, [invoices, search, filters, sort, dateFrom, dateTo]);
 
   // Summary stats for the current filter
   const summary = useMemo(() => {
@@ -202,6 +220,31 @@ export function InvoicesScreen() {
     refresh();
   };
 
+  const bulkChangeStatus = async (status: InvoiceStatus) => {
+    const ids = Array.from(selected);
+    const selectedInvoices = invoices.filter((inv) => ids.includes(inv.id));
+    for (const inv of selectedInvoices) {
+      await saveInvoice({
+        id: inv.id,
+        clientName: inv.clientName,
+        clientId: inv.clientId,
+        status,
+        notes: inv.notes,
+        discount: inv.discount,
+        taxRate: inv.taxRate,
+        items: inv.items,
+        createdBy: inv.createdBy,
+      });
+    }
+    toast.success(
+      `${ids.length} facture(s) → ${INVOICE_STATUS_META[status].label}`
+    );
+    setBulkStatusOpen(false);
+    setSelectionMode(false);
+    clearSelection();
+    refresh();
+  };
+
   return (
     <div>
       <ScreenHeader
@@ -265,6 +308,35 @@ export function InvoicesScreen() {
               >
                 <FileSpreadsheet className="w-4 h-4 mr-1.5" /> Exporter ({selected.size})
               </Button>
+              <DropdownMenu open={bulkStatusOpen} onOpenChange={setBulkStatusOpen}>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={selected.size === 0}
+                    className="rounded-xl h-10 bg-blue-50 text-[#2563EB] border-blue-200 hover:bg-blue-100"
+                  >
+                    <Repeat className="w-4 h-4 mr-1.5" /> Statut ({selected.size})
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <p className="px-2 py-1.5 text-[11px] font-semibold text-slate-400 uppercase tracking-wide">
+                    Changer le statut
+                  </p>
+                  {INVOICE_STATUSES.map((s) => (
+                    <DropdownMenuItem
+                      key={s}
+                      onClick={() => bulkChangeStatus(s)}
+                    >
+                      <span
+                        className="w-2 h-2 rounded-full mr-2"
+                        style={{ backgroundColor: INVOICE_STATUS_META[s].color }}
+                      />
+                      {INVOICE_STATUS_META[s].label}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
               <Button
                 variant="outline"
                 size="sm"
@@ -331,6 +403,42 @@ export function InvoicesScreen() {
               className="text-[12px] font-medium text-slate-400 hover:text-slate-600 underline"
             >
               Effacer
+            </button>
+          )}
+        </div>
+
+        {/* Date range filter */}
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[12px] font-medium text-slate-400 flex items-center gap-1">
+            <CalendarDays className="w-3.5 h-3.5" /> Période :
+          </span>
+          <div className="flex items-center gap-1.5">
+            <Calendar className="w-3.5 h-3.5 text-slate-400" />
+            <Input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              className="h-9 rounded-lg border-slate-200 text-[12.5px] w-[140px]"
+              aria-label="Date de début"
+            />
+            <span className="text-slate-300 text-[12px]">→</span>
+            <Input
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              className="h-9 rounded-lg border-slate-200 text-[12.5px] w-[140px]"
+              aria-label="Date de fin"
+            />
+          </div>
+          {(dateFrom || dateTo) && (
+            <button
+              onClick={() => {
+                setDateFrom("");
+                setDateTo("");
+              }}
+              className="inline-flex items-center gap-1 text-[12px] font-medium text-slate-400 hover:text-red-500"
+            >
+              <XCircle className="w-3.5 h-3.5" /> Effacer
             </button>
           )}
         </div>

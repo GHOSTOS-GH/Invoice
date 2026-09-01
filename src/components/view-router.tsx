@@ -6,6 +6,7 @@ import { DashboardScreen } from "@/components/screens/dashboard-screen";
 import { InvoicesScreen } from "@/components/screens/invoices-screen";
 import { NewInvoiceScreen } from "@/components/screens/new-invoice-screen";
 import { InvoiceDetailScreen } from "@/components/screens/invoice-detail-screen";
+import { ClientsScreen } from "@/components/screens/clients-screen";
 import { ProductsScreen } from "@/components/screens/products-screen";
 import { StatsScreen } from "@/components/screens/stats-screen";
 import { SettingsScreen } from "@/components/screens/settings-screen";
@@ -24,6 +25,8 @@ export function ViewRouter() {
       return <NewInvoiceScreen editInvoiceId={params.invoiceId} />;
     case "invoice-detail":
       return <InvoiceDetailScreen invoiceId={params.invoiceId} />;
+    case "clients":
+      return <ClientsScreen />;
     case "products":
       return <ProductsScreen />;
     case "stats":
