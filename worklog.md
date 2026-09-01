@@ -363,3 +363,173 @@ Task: Clients management screen + bulk status change + date range filter
 4. **Clients count badge on nav** — show the clients count next to the nav item
 5. **Recurring invoices** — schedule weekly/monthly invoice generation
 6. **Activity log** — track who created/modified/deleted what (audit trail for admin)
+
+---
+
+## Task ID: REFACT-DETAIL — invoice-detail-screen.tsx refactor
+
+**Scope**: Removed discount & taxRate entirely from `src/components/screens/invoice-detail-screen.tsx` (project-wide refactor: invoice total is now strictly `sum(quantity × unitPrice)`).
+
+### Changes applied
+1. **Imports** — Removed `invoiceTaxAmount` from `@/lib/types` import (no longer exists). Kept `invoiceTotal`, `invoicePayableTotal`, `invoiceTotalQuantity`, `itemSubtotal`.
+2. **`changeStatus`** — Removed `discount: invoice.discount` and `taxRate: invoice.taxRate` from the `saveInvoice` payload.
+3. **`duplicate`** — Removed `discount: invoice.discount` and `taxRate: invoice.taxRate` from the `saveInvoice` payload.
+4. **Main component** — Removed `const taxAmount = invoiceTaxAmount(invoice);` (kept `total`, `payable`, `qty`).
+5. **`InvoicePrintable`** — Removed `const taxAmount = invoiceTaxAmount(invoice);` (kept `total`, `payable`, `qty`).
+6. **`InvoicePrintable` total box** — Removed the conditional "Remise" (`{invoice.discount > 0 && ...}`) and "TVA" (`{invoice.taxRate > 0 && ...}`) lines. The total box now shows only: TOTAL label, total amount, divider, Articles count, Unités totales, divider, "À PAYER" + payable.
+7. **`formatCurrency`** is already used for all amounts (it performs `Math.round` internally).
+
+### Verification
+- `cd /home/z/my-project && bunx eslint src/components/screens/invoice-detail-screen.tsx` → **0 errors / 0 warnings**.
+
+---
+
+## Task ID: REFACT-CSV — CSV Import Screen Refactor (remove discount & taxRate)
+
+**Agent:** Z.ai Code
+**File edited:** `src/components/screens/csv-import-screen.tsx`
+**Goal:** Remove `discount` and `taxRate` entirely from the CSV import flow. Total = Σ(quantity × unitPrice).
+
+### Changes made
+1. **`ImportField` type union** — removed `"discount"` and `"tax_rate"` members. Final union: `client_name | item_name | quantity | unit_price | status | notes | created_at | ref`.
+2. **`FIELD_DEFS` array** — removed the two entries for "Remise" and "Taux TVA (%)". The mapping UI cards are rendered dynamically from this array, so the discount/tax mapping cards disappear automatically (item 7 of the task).
+3. **`InvoiceGroup` interface** — removed `discount: number;` and `taxRate: number;` fields.
+4. **`autoDetectMapping`** — removed the `discount: find(["remise", "discount", "rabais"])` and `tax_rate: find(["tva", "tax", "taxe", "taux"])` lines from the `next` object.
+5. **Row-to-invoice mapping** — removed `const discountCol = mapping.discount;` and `const taxCol = mapping.tax_rate;`. Removed `discount:` / `taxRate:` properties from the new `InvoiceGroup` object created inside `groupMap.set(...)`. The total now derives purely from `items` (quantity × unitPrice), computed downstream by `invoiceTotal` helpers.
+6. **`saveInvoice` payload** — removed `discount: g.discount,` and `taxRate: g.taxRate,` from the invoice object passed to `saveInvoice`.
+7. **Mapping cards UI** — automatically suppressed by removing the entries from `FIELD_DEFS` (the grid is `{FIELD_DEFS.map(...)}`).
+
+### Verification
+- `rg "discount|taxRate|tax_rate" src/components/screens/csv-import-screen.tsx` → no matches.
+- `bunx eslint src/components/screens/csv-import-screen.tsx` → **0 errors, 0 warnings** (silent success).
+- Each invoice row still produces the required fields: `client_name`, `item_name`, `quantity`, `unit_price`, `status`, `notes`, `created_at`, `ref` — all untouched and functional.
+
+### Notes for downstream agents
+- The `Invoice` type in `src/lib/types.ts` and `saveInvoice` in `src/lib/data-hooks.ts` are no longer sent `discount`/`taxRate` from this screen. If those source files still define optional `discount`/`taxRate` fields, they will simply be `undefined` here — safe. Other refactor tasks (REFACT-TYPES, REFACT-DATAHOOKS, REFACT-INVOICE-FORM, etc.) should align those modules to fully drop the fields.
+- The `parseNumber` helper is still used for `quantity` and `unit_price` parsing, so it must be kept.
+
+---
+
+## Task ID: EXPORT-CLIENTS-PRODUCTS
+**Agent**: Code Agent (export buttons + CSV import)
+**Date**: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+### Context
+Built on top of the shared `src/lib/export-utils.ts` utility created by a previous agent (functions: `exportCsv`, `exportExcel`, `clientsToRows`, `productsToRows`).
+
+### Changes
+
+#### 1. `src/components/screens/clients-screen.tsx`
+- Added imports: `Download`, `Upload`, `FileText`, `FileSpreadsheet` from `lucide-react`; `DropdownMenu*` from `@/components/ui/dropdown-menu`; `Papa` from `papaparse`; `exportCsv`, `exportExcel`, `clientsToRows` from `@/lib/export-utils`; `useRef` from React.
+- Added state: `importing` (boolean), `fileInputRef` (hidden file input).
+- Added handlers:
+  - `handleExportCsv()` → `exportCsv(clientsToRows(clients), \`clients_${date}.csv\`)` + success toast
+  - `handleExportExcel()` → `exportExcel(clientsToRows(clients), \`clients_${date}.xlsx\`, "Clients")` + success toast
+  - `handleImportClick()` → opens hidden file input
+  - `handleImportFile()` → Papa.parse with `header: true`, creates clients via `createClient({ name, phone, address })` for each row (supports both French headers "Nom/Téléphone/Adresse" and English fallback), refreshes list, shows count toast
+- Replaced `actions` in `ScreenHeader` with a `<div className="flex items-center gap-2">` containing: hidden file input, "Importer CSV" outline button (Upload icon, spinner while importing), Exporter `DropdownMenu` (trigger Button variant="outline" size="sm" with Download icon, two items: "Exporter CSV" with FileText icon, "Exporter Excel" with FileSpreadsheet icon), and the existing "Ajouter" button.
+
+#### 2. `src/components/screens/products-screen.tsx`
+- Same import additions (with `productsToRows` instead of `clientsToRows`).
+- Added state: `importing`, `fileInputRef`.
+- Added handlers:
+  - `handleExportCsv()` → `exportCsv(productsToRows(products), \`produits_${date}.csv\`)`
+  - `handleExportExcel()` → `exportExcel(productsToRows(products), \`produits_${date}.xlsx\`, "Produits")`
+  - `handleImportClick()` / `handleImportFile()` → Papa.parse, creates products via `createProduct({ name, category, imageUrl })` (skips rows missing name or category), refreshes list.
+- Updated `ScreenHeader` `actions`: kept existing RefreshCw button, added hidden file input, added "Importer CSV" outline button, added Exporter `DropdownMenu`, kept existing "Ajouter" button.
+
+### Styling notes
+- All buttons use `rounded-xl` and `h-9` to match the existing "Ajouter" button height.
+- Brand color `#2563EB` preserved on the primary "Ajouter" button.
+- All labels in French.
+
+### Verification
+- `bunx eslint src/components/screens/clients-screen.tsx src/components/screens/products-screen.tsx` → **0 errors** (exit code 0)
+- `bunx tsc --noEmit` shows no errors in either file.
+- Pre-existing unrelated error in `src/lib/pdf-generation.ts` (missing `invoiceTaxAmount` export) was not touched by this task.
+
+### Files modified
+- `src/components/screens/clients-screen.tsx`
+- `src/components/screens/products-screen.tsx`
+
+---
+Task ID: MAJOR-REFACTOR
+Agent: main
+Task: Major refactoring — remove discount/tax, admin-only products, admin dashboard, CSV/Excel export, security audit
+
+## Current project status assessment
+User requested a major refactoring to match the Flutter mobile app behavior exactly:
+1. Remove discount and taxRate entirely from invoice calculation (total = simple sum of line subtotals)
+2. Add CSV/Excel export on invoices/clients/products screens
+3. Products management reserved to admin only
+4. Distinct admin interface with icon-oriented dashboard + permanent mode indicator
+5. Reinforce admin monopoly on all sensitive API routes
+6. Non-regression verification
+
+## Completed modifications
+
+### 1. Invoice calculation — total removal of discount/tax
+- **Prisma schema**: removed `discount` and `taxRate` fields from Invoice model, ran `db:push` migration
+- **types.ts**: removed `discount`/`taxRate` from Invoice interface, deleted `invoiceTaxAmount()`, simplified `invoicePayableTotal()` to just sum line subtotals (no params beyond items)
+- **API route** `/api/invoices/[id]` PUT: removed discount/taxRate from destructured body + Prisma data object
+- **new-invoice-screen.tsx**: removed discount/tax state, inputs, calc section; replaced "Remise, TVA & Notes" card with simple "Notes" card; totals panel now shows only "Sous-total" + "TOTAL À PAYER"
+- **invoice-detail-screen.tsx** (via subagent): removed invoiceTaxAmount import, removed discount/taxRate from saveInvoice payloads, removed Remise/TVA lines from InvoicePrintable total box
+- **invoices-screen.tsx**: removed discount/taxRate from bulkChangeStatus payload, simplified InvoiceCard right-side display
+- **csv-import-screen.tsx** (via subagent): removed discount/tax_rate from field definitions, InvoiceGroup interface, auto-detection, row mapping, and saveInvoice payload
+- **pdf-generator.ts**: removed invoiceTaxAmount/invoicePayableTotal imports, removed taxAmount/payable vars, removed the entire "Remise/TVA/À PAYER" conditional block — PDF now shows only items table + total box with TOTAL + Articles + Unités totales
+
+### 2. CSV/Excel export
+- Installed `xlsx` (SheetJS) package
+- Created `src/lib/export-utils.ts` with shared functions: `exportCsv()`, `exportExcel()`, `invoicesToRows()`, `clientsToRows()`, `productsToRows()`
+- **invoices-screen.tsx**: replaced inline CSV export with `exportInvoices(format)` supporting both CSV and Excel; added export dropdown in ScreenHeader (always visible) + in selection mode
+- **clients-screen.tsx** (via subagent): added export dropdown (CSV + Excel) + CSV import button (PapaParse → createClient)
+- **products-screen.tsx** (via subagent): added export dropdown (CSV + Excel) + CSV import button (PapaParse → createProduct)
+- Format is compatible with the existing CSV import screen for full round-trip export → reimport
+
+### 3. Products admin-only
+- **app-shell.tsx**: changed Products nav item `minRole` from "employee" to "admin" (hidden from employees)
+- **API /api/products POST**: changed from `requireAuth()` to `requireRole("admin")`
+- **API /api/products/[id] PUT/DELETE**: changed from `requireAuth()` to `requireRole("admin")`
+- GET remains accessible to employees (needed for the invoice product picker)
+
+### 4. Admin interface with icon-oriented dashboard + mode indicator
+- **app-shell.tsx**: added permanent colored mode indicator band below OfflineBanner:
+  - Admin: purple gradient "Mode Administrateur — Accès total" with ShieldCheck icon
+  - Employee: emerald "Mode Employé — Factures & Clients" with Briefcase icon
+- **dashboard-screen.tsx**: added "Espace Administration" section with 5 large icon tiles (Statistiques, Produits, Comptes, Réglages, Import CSV) — visible only for admin role. Each tile has a colored icon badge (56-64px), label, and description. Uses cardRadius 16, hover lift + scale.
+
+### 5. Security audit — all sensitive routes verified
+Verified all API routes use correct role checks:
+- `/api/users` GET → `requireRole("admin")` ✅
+- `/api/users/[id]/role` PUT → `requireRole("admin")` ✅
+- `/api/users/[id]/disable` PUT → `requireRole("admin")` ✅
+- `/api/settings` PUT → `requireRole("admin")` ✅
+- `/api/products` POST → `requireRole("admin")` ✅
+- `/api/products/[id]` PUT/DELETE → `requireRole("admin")` ✅
+- `/api/maintenance` GET → public (needed for login page) ✅
+
+### 6. README updated
+- Added comprehensive API route table with method, minimum role, and verification function for every route
+- Added "Ce qu'un employé ne peut JAMAIS faire" section listing all forbidden actions
+
+## Verification results (non-regression tests)
+1. ✅ **3-item invoice calculation**: Created invoice with items A(2×8000), B(3×5000), C(1×12000) → total = 43000 FCFA (correct simple sum, no decimals)
+2. ✅ **Invoice JSON has NO discount/taxRate fields** — confirmed via API response
+3. ✅ **PDF generator has NO Remise/TVA references** — grep returned empty
+4. ✅ **Employee cannot see Products menu** — nav minRole changed to "admin"
+5. ✅ **Employee product write API returns 403** — `curl -X POST /api/products` with employee cookie returned `{"error":"Accès refusé"} HTTP 403`
+6. ✅ **CSV/Excel export** — shared export-utils.ts with SheetJS, dropdowns on all 3 list screens
+7. ✅ **Lint clean** — `bun run lint` returns 0 errors, 0 warnings
+8. ✅ **Home page compiles** — HTTP 200, no errors in dev.log
+
+## Unresolved issues / risks
+- **Dev server sandbox instability** persists (process exits after first compile cycle) — verified via curl + lint
+- **formatCurrency/formatNumber** already use Math.round — confirmed no decimal amounts anywhere
+- Client ↔ Invoice link is still by name matching (not FK) — acceptable for now
+
+## Priority recommendations for next phase
+1. **Search highlighting** in invoice cards
+2. **Multi-invoice PDF export** (single PDF, one invoice per page)
+3. **Activity log / audit trail** for admin
+4. **Recurring invoices** scheduling
+5. **Client count badge** on nav items

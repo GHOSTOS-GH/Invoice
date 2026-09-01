@@ -21,6 +21,8 @@ import {
   HardHat,
   ShieldAlert,
   LayoutDashboard,
+  ShieldCheck,
+  Briefcase,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -50,7 +52,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: "new-invoice", label: "Nouvelle", icon: PlusCircle, minRole: "employee" },
   { id: "clients", label: "Clients", icon: Users, minRole: "employee" },
   { id: "stats", label: "Statistiques", icon: BarChart3, minRole: "employee" },
-  { id: "products", label: "Produits", icon: Package, minRole: "employee" },
+  { id: "products", label: "Produits", icon: Package, minRole: "admin" },
   { id: "csv-import", label: "Import CSV", icon: Upload, minRole: "employee" },
   { id: "settings", label: "Réglages", icon: SettingsIcon, minRole: "admin" },
   { id: "users", label: "Comptes", icon: Users, minRole: "admin" },
@@ -183,6 +185,18 @@ export function AppShell({
     <NavContext.Provider value={{ view, params, navigate }}>
       <div className="min-h-screen flex flex-col bg-slate-50">
         <OfflineBanner />
+        {/* Permanent mode indicator — impossible to confuse admin vs employee */}
+        {user.role === "admin" ? (
+          <div className="bg-gradient-to-r from-purple-600 via-purple-700 to-indigo-700 text-white text-[11px] font-bold tracking-wider px-4 py-1.5 flex items-center justify-center gap-2 uppercase">
+            <ShieldCheck className="w-3.5 h-3.5" />
+            Mode Administrateur — Accès total
+          </div>
+        ) : (
+          <div className="bg-emerald-600 text-white text-[11px] font-bold tracking-wider px-4 py-1.5 flex items-center justify-center gap-2 uppercase">
+            <Briefcase className="w-3.5 h-3.5" />
+            Mode Employé — Factures & Clients
+          </div>
+        )}
         <div className="flex flex-1">
           {/* Desktop sidebar */}
           <aside className="hidden md:flex w-60 lg:w-64 flex-col border-r border-slate-200 bg-white shrink-0 sticky top-0 h-screen">

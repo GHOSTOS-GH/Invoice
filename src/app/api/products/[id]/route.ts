@@ -1,7 +1,7 @@
-// GET/PUT/DELETE /api/products/[id]
+// PUT/DELETE /api/products/[id] — admin only
 import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
-import { requireAuth, authErrorResponse } from "@/lib/auth";
+import { requireRole, authErrorResponse } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
@@ -10,10 +10,7 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const user = await requireAuth();
-    if (user.role === "client") {
-      return Response.json({ error: "Accès refusé" }, { status: 403 });
-    }
+    const user = await requireRole("admin");
     const { id } = await params;
     const body = await req.json();
     const existing = await db.product.findUnique({ where: { id } });
@@ -40,10 +37,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const user = await requireAuth();
-    if (user.role === "client") {
-      return Response.json({ error: "Accès refusé" }, { status: 403 });
-    }
+    const user = await requireRole("admin");
     const { id } = await params;
     const existing = await db.product.findUnique({ where: { id } });
     if (!existing || existing.createdBy !== user.id) {

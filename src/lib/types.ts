@@ -17,8 +17,6 @@ export interface Invoice {
   clientId?: string | null;
   status: InvoiceStatus;
   notes?: string | null;
-  discount: number;
-  taxRate: number;
   createdBy: string;
   createdAt: string;
   updatedAt: string;
@@ -73,32 +71,26 @@ export interface SessionUser {
   name?: string | null;
 }
 
-// ---------- Derived calculations (mirror invoice.dart) ----------
+// ---------- Derived calculations (mirror invoice.dart, simplified) ----------
+// Calculation is strictly: for each item, quantity × unit_price = line subtotal.
+// The invoice total is the sum of all line subtotals. No discount, no tax.
 
 export function itemSubtotal(item: { quantity: number; unitPrice: number }) {
   return item.quantity * item.unitPrice;
 }
 
+/** Sum of all line subtotals (quantity × unit_price). */
 export function invoiceTotal(items: { quantity: number; unitPrice: number }[]) {
   return items.reduce((s, it) => s + itemSubtotal(it), 0);
 }
 
-export function invoiceTaxAmount(inv: {
-  items: { quantity: number; unitPrice: number }[];
-  discount: number;
-  taxRate: number;
-}) {
-  const total = invoiceTotal(inv.items);
-  return Math.max(0, total - inv.discount) * (inv.taxRate / 100);
-}
-
-export function invoicePayableTotal(inv: {
-  items: { quantity: number; unitPrice: number }[];
-  discount: number;
-  taxRate: number;
-}) {
-  const total = invoiceTotal(inv.items);
-  return Math.max(0, total - inv.discount) + invoiceTaxAmount(inv);
+/**
+ * Total to pay = sum of all line subtotals.
+ * Accepts either an invoice object (with `items`) or an items array directly,
+ * so all existing call sites keep working. No discount, no tax — ever.
+ */
+export function invoicePayableTotal(inv: { items: { quantity: number; unitPrice: number }[] }) {
+  return invoiceTotal(inv.items);
 }
 
 export function invoiceTotalQuantity(items: { quantity: number }[]) {

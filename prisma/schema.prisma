@@ -32,8 +32,6 @@ model Invoice {
   client     Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
   status     String   @default("enCours") // enCours | enLivraison | livree | archivee
   notes      String?
-  discount   Float    @default(0) // remise en FCFA
-  taxRate    Float    @default(0) // taux TVA en %
   createdBy  String
   creator    User     @relation(fields: [createdBy], references: [id], onDelete: Cascade)
   createdAt  DateTime @default(now())

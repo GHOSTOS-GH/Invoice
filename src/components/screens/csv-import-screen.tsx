@@ -56,8 +56,6 @@ type ImportField =
   | "item_name"
   | "quantity"
   | "unit_price"
-  | "discount"
-  | "tax_rate"
   | "status"
   | "notes"
   | "created_at"
@@ -75,8 +73,6 @@ const FIELD_DEFS: FieldDef[] = [
   { key: "item_name", label: "Article", required: true, description: "Nom de l'article" },
   { key: "quantity", label: "Quantité", required: true, description: "Quantité (nombre)" },
   { key: "unit_price", label: "Prix unitaire", required: true, description: "Prix unitaire (FCFA)" },
-  { key: "discount", label: "Remise", required: false, description: "Remise (FCFA)" },
-  { key: "tax_rate", label: "Taux TVA (%)", required: false, description: "Taux de taxe" },
   { key: "status", label: "Statut", required: false, description: "enCours / livree / …" },
   { key: "notes", label: "Notes", required: false, description: "Notes de la facture" },
   { key: "created_at", label: "Date", required: false, description: "Date de création" },
@@ -151,8 +147,6 @@ interface InvoiceGroup {
   status: InvoiceStatus;
   notes: string;
   createdAt: string;
-  discount: number;
-  taxRate: number;
   items: { name: string; quantity: number; unitPrice: number }[];
 }
 
@@ -212,8 +206,6 @@ export function CsvImportScreen() {
       item_name: find(["article", "produit", "designation", "libelle", "description"]),
       quantity: find(["quantite", "qte", "qty"]),
       unit_price: find(["prix unitaire", "prix", "pu", "unit price", "price"]),
-      discount: find(["remise", "discount", "rabais"]),
-      tax_rate: find(["tva", "tax", "taxe", "taux"]),
       status: find(["statut", "status", "etat"]),
       notes: find(["note", "notes", "observation"]),
       created_at: find(["date", "cree le", "created"]),
@@ -310,8 +302,6 @@ export function CsvImportScreen() {
     const itemCol = mapping.item_name!;
     const qtyCol = mapping.quantity;
     const priceCol = mapping.unit_price;
-    const discountCol = mapping.discount;
-    const taxCol = mapping.tax_rate;
     const statusCol = mapping.status;
     const notesCol = mapping.notes;
     const dateCol = mapping.created_at;
@@ -334,8 +324,6 @@ export function CsvImportScreen() {
           status: statusCol ? parseStatus(row[statusCol]) : "enCours",
           notes: notesCol ? (row[notesCol] || "").trim() : "",
           createdAt,
-          discount: discountCol ? parseNumber(row[discountCol], 0) : 0,
-          taxRate: taxCol ? parseNumber(row[taxCol], 0) : 0,
           items: [],
         });
       }
@@ -428,8 +416,6 @@ export function CsvImportScreen() {
           clientName: g.clientName,
           status: g.status,
           notes: g.notes || null,
-          discount: g.discount,
-          taxRate: g.taxRate,
           items,
           createdAt: g.createdAt,
           updatedAt: new Date().toISOString(),

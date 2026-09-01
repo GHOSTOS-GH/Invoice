@@ -25,10 +25,10 @@ import {
   ArrowLeft,
   Package,
   User,
-  Calculator,
   X,
   Search,
   Loader2,
+  StickyNote,
 } from "lucide-react";
 import {
   formatCurrency,
@@ -36,7 +36,6 @@ import {
 } from "@/lib/formatters";
 import {
   invoiceTotal,
-  invoiceTaxAmount,
   invoicePayableTotal,
   itemSubtotal,
   invoiceTotalQuantity,
@@ -71,8 +70,6 @@ export function NewInvoiceScreen({ editInvoiceId }: { editInvoiceId?: string }) 
   const [clientName, setClientName] = useState("");
   const [status, setStatus] = useState<InvoiceStatus>("enCours");
   const [notes, setNotes] = useState("");
-  const [discount, setDiscount] = useState("0");
-  const [taxRate, setTaxRate] = useState("0");
   const [items, setItems] = useState<InvoiceItem[]>([]);
   const [saving, setSaving] = useState(false);
   const [loadingEdit, setLoadingEdit] = useState(!!editInvoiceId);
@@ -99,8 +96,6 @@ export function NewInvoiceScreen({ editInvoiceId }: { editInvoiceId?: string }) 
           setClientName(inv.clientName);
           setStatus(inv.status);
           setNotes(inv.notes ?? "");
-          setDiscount(String(inv.discount || 0));
-          setTaxRate(String(inv.taxRate || 0));
           setItems(inv.items.map((it) => ({ ...it })));
         }
       } catch {
@@ -140,10 +135,7 @@ export function NewInvoiceScreen({ editInvoiceId }: { editInvoiceId?: string }) 
   }, [filteredProducts, activeCategory]);
 
   const total = invoiceTotal(items);
-  const discountNum = Math.max(0, Number(discount) || 0);
-  const taxNum = Math.max(0, Number(taxRate) || 0);
-  const taxAmount = invoiceTaxAmount({ items, discount: discountNum, taxRate: taxNum });
-  const payable = invoicePayableTotal({ items, discount: discountNum, taxRate: taxNum });
+  const payable = invoicePayableTotal({ items });
   const totalQty = invoiceTotalQuantity(items);
 
   const addItem = () => {
@@ -217,8 +209,6 @@ export function NewInvoiceScreen({ editInvoiceId }: { editInvoiceId?: string }) 
         clientId,
         status,
         notes: notes.trim() || null,
-        discount: discountNum,
-        taxRate: taxNum,
         items: items.map((it) => ({
           id: it.id,
           name: it.name,
@@ -451,37 +441,13 @@ export function NewInvoiceScreen({ editInvoiceId }: { editInvoiceId?: string }) 
           )}
         </div>
 
-        {/* Discount, tax, notes */}
-        <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 space-y-4">
+        {/* Notes */}
+        <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 space-y-3">
           <h3 className="font-bold text-slate-900 text-[15px] flex items-center gap-2">
-            <Calculator className="w-4 h-4 text-[#2563EB]" /> Remise, TVA & Notes
+            <StickyNote className="w-4 h-4 text-[#2563EB]" /> Notes
           </h3>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label className="text-slate-600 text-[12px] mb-1 block">Remise (FCFA)</Label>
-              <Input
-                type="number"
-                min="0"
-                value={discount}
-                onChange={(e) => setDiscount(e.target.value)}
-                className="h-10 rounded-xl"
-              />
-            </div>
-            <div>
-              <Label className="text-slate-600 text-[12px] mb-1 block">TVA (%)</Label>
-              <Input
-                type="number"
-                min="0"
-                max="100"
-                step="0.1"
-                value={taxRate}
-                onChange={(e) => setTaxRate(e.target.value)}
-                className="h-10 rounded-xl"
-              />
-            </div>
-          </div>
           <div>
-            <Label className="text-slate-600 text-[12px] mb-1 block">Notes</Label>
+            <Label className="text-slate-600 text-[12px] mb-1 block">Notes optionnelles</Label>
             <Textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
@@ -491,25 +457,11 @@ export function NewInvoiceScreen({ editInvoiceId }: { editInvoiceId?: string }) 
           </div>
         </div>
 
-        {/* Totals */}
+        {/* Totals — simple sum, no discount/tax */}
         <div className="bg-gradient-to-br from-[#2563EB] to-[#1D4ED8] rounded-2xl p-5 text-white shadow-lg shadow-blue-500/25">
-          <div className="space-y-2 mb-4">
-            <div className="flex justify-between text-[13px]">
-              <span className="text-white/70">Sous-total ({totalQty} unités)</span>
-              <span className="font-semibold">{formatCurrency(total)}</span>
-            </div>
-            {discountNum > 0 && (
-              <div className="flex justify-between text-[13px]">
-                <span className="text-white/70">Remise</span>
-                <span className="font-semibold">− {formatCurrency(discountNum)}</span>
-              </div>
-            )}
-            {taxNum > 0 && (
-              <div className="flex justify-between text-[13px]">
-                <span className="text-white/70">TVA ({taxNum}%)</span>
-                <span className="font-semibold">+ {formatCurrency(taxAmount)}</span>
-              </div>
-            )}
+          <div className="flex justify-between text-[13px] mb-3">
+            <span className="text-white/70">Sous-total ({totalQty} unités)</span>
+            <span className="font-semibold">{formatCurrency(total)}</span>
           </div>
           <div className="border-t border-white/20 pt-3 flex justify-between items-end">
             <span className="text-white/70 text-[12px] font-bold tracking-wider">TOTAL À PAYER</span>

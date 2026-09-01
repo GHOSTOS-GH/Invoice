@@ -30,6 +30,7 @@ import {
   CalendarDays,
   XCircle,
   Repeat,
+  Download,
 } from "lucide-react";
 import {
   INVOICE_STATUS_META,
@@ -40,9 +41,12 @@ import {
   formatCurrency,
   formatDateTime,
   refId,
-  escapeCsv,
-  numStr,
 } from "@/lib/formatters";
+import {
+  exportCsv,
+  exportExcel,
+  invoicesToRows,
+} from "@/lib/export-utils";
 import {
   invoiceTotal,
   invoicePayableTotal,
@@ -166,47 +170,28 @@ export function InvoicesScreen() {
   const selectAll = () => setSelected(new Set(filtered.map((i) => i.id)));
   const clearSelection = () => setSelected(new Set());
 
-  const exportCsv = useCallback(() => {
-    const toExport = selected.size > 0 ? filtered.filter((i) => selected.has(i.id)) : filtered;
-    if (toExport.length === 0) {
-      toast.error("Aucune facture à exporter");
-      return;
-    }
-    const rows: string[][] = [
-      ["Date", "Réf", "Client", "Statut", "Article", "Quantité", "Prix unitaire", "Sous-total", "Total facture", "Notes"],
-    ];
-    for (const inv of toExport) {
-      const date = formatDateTime(inv.createdAt);
-      const ref = refId(inv.id);
-      const total = numStr(invoiceTotal(inv.items));
-      const notes = inv.notes ?? "";
-      for (const item of inv.items) {
-        rows.push([
-          date,
-          ref,
-          inv.clientName,
-          INVOICE_STATUS_META[inv.status].label,
-          item.name,
-          String(item.quantity),
-          numStr(item.unitPrice),
-          numStr(item.quantity * item.unitPrice),
-          total,
-          notes,
-        ]);
+  const exportInvoices = useCallback(
+    (format: "csv" | "excel") => {
+      const toExport =
+        selected.size > 0 ? filtered.filter((i) => selected.has(i.id)) : filtered;
+      if (toExport.length === 0) {
+        toast.error("Aucune facture à exporter");
+        return;
       }
-    }
-    const csv = "\uFEFF" + rows.map((r) => r.map(escapeCsv).join(";")).join("\r\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `factures_${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-    toast.success(`${toExport.length} facture(s) exportée(s) en CSV`);
-    setSelectionMode(false);
-    clearSelection();
-  }, [filtered, selected]);
+      const rows = invoicesToRows(toExport);
+      const date = new Date().toISOString().slice(0, 10);
+      if (format === "csv") {
+        exportCsv(rows, `factures_${date}.csv`);
+        toast.success(`${toExport.length} facture(s) exportée(s) en CSV`);
+      } else {
+        exportExcel(rows, `factures_${date}.xlsx`, "Factures");
+        toast.success(`${toExport.length} facture(s) exportée(s) en Excel`);
+      }
+      setSelectionMode(false);
+      clearSelection();
+    },
+    [filtered, selected]
+  );
 
   const bulkDelete = async () => {
     const ids = Array.from(selected);
@@ -230,8 +215,6 @@ export function InvoicesScreen() {
         clientId: inv.clientId,
         status,
         notes: inv.notes,
-        discount: inv.discount,
-        taxRate: inv.taxRate,
         items: inv.items,
         createdBy: inv.createdBy,
       });
@@ -261,6 +244,25 @@ export function InvoicesScreen() {
             >
               <RefreshCw className="w-4 h-4" />
             </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="rounded-xl h-9 px-3"
+                >
+                  <Download className="w-4 h-4 mr-1.5" /> Exporter
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => exportInvoices("csv")}>
+                  <FileSpreadsheet className="w-4 h-4 mr-2 text-green-600" /> CSV
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => exportInvoices("excel")}>
+                  <FileSpreadsheet className="w-4 h-4 mr-2 text-emerald-600" /> Excel (.xlsx)
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <Button
               size="sm"
               onClick={() => navigate("new-invoice")}
@@ -300,14 +302,25 @@ export function InvoicesScreen() {
           </DropdownMenu>
           {selectionMode ? (
             <>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={exportCsv}
-                className="rounded-xl h-10 bg-green-50 text-green-700 border-green-200 hover:bg-green-100"
-              >
-                <FileSpreadsheet className="w-4 h-4 mr-1.5" /> Exporter ({selected.size})
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="rounded-xl h-10 bg-green-50 text-green-700 border-green-200 hover:bg-green-100"
+                  >
+                    <FileSpreadsheet className="w-4 h-4 mr-1.5" /> Exporter ({selected.size})
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => exportInvoices("csv")}>
+                    <FileSpreadsheet className="w-4 h-4 mr-2 text-green-600" /> Exporter en CSV
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => exportInvoices("excel")}>
+                    <FileSpreadsheet className="w-4 h-4 mr-2 text-emerald-600" /> Exporter en Excel (.xlsx)
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
               <DropdownMenu open={bulkStatusOpen} onOpenChange={setBulkStatusOpen}>
                 <DropdownMenuTrigger asChild>
                   <Button
@@ -571,7 +584,6 @@ function InvoiceCard({
   onToggleSelect: () => void;
   onOpen: () => void;
 }) {
-  const total = invoiceTotal(invoice.items);
   const payable = invoicePayableTotal(invoice);
   const qty = invoiceTotalQuantity(invoice.items);
   return (
@@ -620,15 +632,9 @@ function InvoiceCard({
             <p className="font-extrabold text-[#2563EB] text-[16px] leading-tight tabular-nums">
               {formatCurrency(payable)}
             </p>
-            {(invoice.discount > 0 || invoice.taxRate > 0) ? (
-              <p className="text-[11px] text-slate-400 tabular-nums">
-                {formatCurrency(total)}
-              </p>
-            ) : (
-              <p className="text-[10px] text-slate-300">
-                {invoice.items.length} art. · {qty}u
-              </p>
-            )}
+            <p className="text-[10px] text-slate-300">
+              {invoice.items.length} art. · {qty}u
+            </p>
           </div>
         </button>
       </div>

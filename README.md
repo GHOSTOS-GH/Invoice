@@ -111,18 +111,46 @@ L'application est disponible sur `http://localhost:3000`.
 
 ## Sécurité — RLS équivalent
 
-Chaque route API vérifie l'authentification et le rôle côté serveur (jamais côté client) :
+Chaque route API vérifie l'authentification et le rôle côté serveur (jamais côté client). Le rôle est toujours relu depuis la base de données (source de vérité), jamais depuis le JWT seul.
 
-| Table | Lecture | Écriture | Règle |
-|-------|---------|----------|-------|
-| invoices | employé/admin (les siennes) | employé/admin | Un client ne voit aucune facture |
-| clients | employé/admin (les siens) | employé/admin | Un client n'a aucun accès |
-| products | employé/admin (les siens) | employé/admin | Un client n'a aucun accès |
-| settings | tout utilisateur connecté | admin uniquement | `requireRole("admin")` |
-| users | admin uniquement | admin uniquement | `requireRole("admin")` |
-| settings.maintenanceMode | — | admin uniquement | Vérifié côté serveur à chaque requête |
+### Tableau récapitulatif des routes API et rôles minimum
 
-Les fonctions `requireAuth()` et `requireRole(min)` dans `src/lib/auth.ts` implémentent ces vérifications. Le rôle est toujours relu depuis la base de données (source de vérité), jamais depuis le JWT seul.
+| Route API | Méthode | Rôle minimum | Vérification |
+|-----------|---------|-------------|--------------|
+| `/api/auth/login` | POST | public | — |
+| `/api/auth/register` | POST | public | — (nouveau compte = toujours `client`) |
+| `/api/auth/logout` | POST | authentifié | `requireAuth()` |
+| `/api/auth/me` | GET | authentifié | `requireAuth()` |
+| `/api/maintenance` | GET | public | — (pour l'écran de login) |
+| `/api/seed` | POST | public | — (désactivée si un admin existe déjà) |
+| `/api/invoices` | GET | employé | `requireAuth()` + client→403 |
+| `/api/invoices/[id]` | GET | employé | `requireAuth()` + client→403 |
+| `/api/invoices/[id]` | PUT | employé | `requireAuth()` + client→403 |
+| `/api/invoices/[id]` | DELETE | employé | `requireAuth()` + client→403 |
+| `/api/clients` | GET | employé | `requireAuth()` + client→[] |
+| `/api/clients` | POST | employé | `requireAuth()` + client→403 |
+| `/api/clients/[id]` | GET/PUT/DELETE | employé | `requireAuth()` + client→403 |
+| `/api/products` | GET | employé | `requireAuth()` (lecture pour le sélecteur de facture) |
+| `/api/products` | POST | **admin** | `requireRole("admin")` |
+| `/api/products/[id]` | PUT | **admin** | `requireRole("admin")` |
+| `/api/products/[id]` | DELETE | **admin** | `requireRole("admin")` |
+| `/api/settings` | GET | authentifié | `requireAuth()` |
+| `/api/settings` | PUT | **admin** | `requireRole("admin")` |
+| `/api/users` | GET | **admin** | `requireRole("admin")` |
+| `/api/users/[id]/role` | PUT | **admin** | `requireRole("admin")` + auto-protection |
+| `/api/users/[id]/disable` | PUT | **admin** | `requireRole("admin")` + auto-protection |
+| `/api/upload` | POST | employé | `requireAuth()` + client→403 |
+
+### Ce qu'un employé ne peut JAMAIS faire (même en modifiant les requêtes côté client)
+
+- ❌ Changer son propre rôle ou celui d'un autre compte → `requireRole("admin")` sur `/api/users/[id]/role`
+- ❌ Activer/désactiver le mode maintenance → `requireRole("admin")` sur `/api/settings` PUT
+- ❌ Modifier les informations de la boutique → `requireRole("admin")` sur `/api/settings` PUT
+- ❌ Créer, modifier ou supprimer un produit → `requireRole("admin")` sur `/api/products` POST et `/api/products/[id]` PUT/DELETE
+- ❌ Désactiver ou supprimer un autre compte → `requireRole("admin")` sur `/api/users/[id]/disable`
+- ❌ Voir la liste des comptes utilisateurs → `requireRole("admin")` sur `/api/users` GET
+
+Toutes ces vérifications sont effectuées **côté serveur** via les fonctions `requireAuth()` et `requireRole("admin")` dans `src/lib/auth.ts`. Le rôle est toujours relu depuis la base de données, jamais depuis le JWT seul.
 
 ## Architecture offline-first
 

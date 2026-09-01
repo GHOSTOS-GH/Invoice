@@ -2,7 +2,7 @@
 // Clients management — list, add, edit, delete, and per-client invoice history.
 // Matches the Flutter app's settings "Clients" tab but as a full screen.
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import {
   useClients,
   useInvoices,
@@ -49,11 +49,27 @@ import {
   Loader2,
   Mailbox,
   Calendar,
+  Download,
+  Upload,
+  FileText,
+  FileSpreadsheet,
 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import Papa from "papaparse";
 import { formatCurrency, formatDate, formatDateTime, refId } from "@/lib/formatters";
 import { invoiceTotal, invoicePayableTotal } from "@/lib/types";
 import type { Client, Invoice } from "@/lib/types";
 import { toast } from "sonner";
+import {
+  exportCsv,
+  exportExcel,
+  clientsToRows,
+} from "@/lib/export-utils";
 
 export function ClientsScreen() {
   const { clients, loading, refresh } = useClients();
@@ -64,6 +80,63 @@ export function ClientsScreen() {
   const [showForm, setShowForm] = useState(false);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Client | null>(null);
+  const [importing, setImporting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleExportCsv = () => {
+    const date = new Date().toISOString().slice(0, 10);
+    exportCsv(clientsToRows(clients), `clients_${date}.csv`);
+    toast.success("Clients exportés en CSV");
+  };
+
+  const handleExportExcel = () => {
+    const date = new Date().toISOString().slice(0, 10);
+    exportExcel(clientsToRows(clients), `clients_${date}.xlsx`, "Clients");
+    toast.success("Clients exportés en Excel");
+  };
+
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImporting(true);
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: async (res) => {
+        try {
+          const rows = res.data as Record<string, string>[];
+          let count = 0;
+          for (const row of rows) {
+            const name = (row["Nom"] ?? row["name"] ?? "").trim();
+            if (!name) continue;
+            const phone = (row["Téléphone"] ?? row["phone"] ?? "").trim();
+            const address = (row["Adresse"] ?? row["address"] ?? "").trim();
+            await createClient({
+              name,
+              phone: phone || undefined,
+              address: address || undefined,
+            });
+            count++;
+          }
+          toast.success(`${count} client(s) importé(s)`);
+          refresh();
+        } catch (err: any) {
+          toast.error(err.message || "Erreur lors de l'import");
+        } finally {
+          setImporting(false);
+          if (fileInputRef.current) fileInputRef.current.value = "";
+        }
+      },
+      error: (err) => {
+        toast.error(err.message || "Erreur de lecture du fichier");
+        setImporting(false);
+      },
+    });
+  };
 
   // Map clientName → invoices (history) + totals
   const clientStats = useMemo(() => {
@@ -134,16 +207,57 @@ export function ClientsScreen() {
         subtitle={`${clients.length} client(s) au total`}
         icon={Users}
         actions={
-          <Button
-            size="sm"
-            onClick={() => {
-              setEditing(null);
-              setShowForm(true);
-            }}
-            className="rounded-xl bg-[#2563EB] hover:bg-[#1D4ED8]"
-          >
-            <UserPlus className="w-4 h-4 mr-1.5" /> Ajouter
-          </Button>
+          <div className="flex items-center gap-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv,text/csv"
+              className="hidden"
+              onChange={handleImportFile}
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleImportClick}
+              disabled={importing}
+              className="rounded-xl h-9"
+            >
+              {importing ? (
+                <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+              ) : (
+                <Upload className="w-4 h-4 mr-1.5" />
+              )}
+              Importer CSV
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="rounded-xl h-9">
+                  <Download className="w-4 h-4 mr-1.5" />
+                  Exporter
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={handleExportCsv}>
+                  <FileText className="w-4 h-4 mr-2" />
+                  Exporter CSV
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleExportExcel}>
+                  <FileSpreadsheet className="w-4 h-4 mr-2" />
+                  Exporter Excel
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Button
+              size="sm"
+              onClick={() => {
+                setEditing(null);
+                setShowForm(true);
+              }}
+              className="rounded-xl bg-[#2563EB] hover:bg-[#1D4ED8]"
+            >
+              <UserPlus className="w-4 h-4 mr-1.5" /> Ajouter
+            </Button>
+          </div>
         }
       />
 

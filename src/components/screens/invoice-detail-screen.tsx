@@ -54,7 +54,6 @@ import {
 } from "@/lib/formatters";
 import {
   invoiceTotal,
-  invoiceTaxAmount,
   invoicePayableTotal,
   invoiceTotalQuantity,
   itemSubtotal,
@@ -105,8 +104,6 @@ export function InvoiceDetailScreen({ invoiceId }: { invoiceId?: string }) {
         clientId: invoice.clientId,
         status,
         notes: invoice.notes,
-        discount: invoice.discount,
-        taxRate: invoice.taxRate,
         items: invoice.items,
         createdBy: invoice.createdBy,
       });
@@ -126,8 +123,6 @@ export function InvoiceDetailScreen({ invoiceId }: { invoiceId?: string }) {
         clientId: invoice.clientId,
         status: "enCours",
         notes: invoice.notes,
-        discount: invoice.discount,
-        taxRate: invoice.taxRate,
         items: invoice.items.map((it) => ({
           name: it.name,
           quantity: it.quantity,
@@ -223,7 +218,6 @@ export function InvoiceDetailScreen({ invoiceId }: { invoiceId?: string }) {
   if (!invoice) return null;
 
   const total = invoiceTotal(invoice.items);
-  const taxAmount = invoiceTaxAmount(invoice);
   const payable = invoicePayableTotal(invoice);
   const qty = invoiceTotalQuantity(invoice.items);
 
@@ -374,7 +368,6 @@ export function InvoiceDetailScreen({ invoiceId }: { invoiceId?: string }) {
 // Used both for on-screen display and html2canvas PNG capture.
 export function InvoicePrintable({ invoice }: { invoice: Invoice }) {
   const total = invoiceTotal(invoice.items);
-  const taxAmount = invoiceTaxAmount(invoice);
   const payable = invoicePayableTotal(invoice);
   const qty = invoiceTotalQuantity(invoice.items);
 
@@ -482,18 +475,6 @@ export function InvoicePrintable({ invoice }: { invoice: Invoice }) {
             <span className="text-white/70">Unités totales</span>
             <span className="font-bold">{qty}</span>
           </div>
-          {invoice.discount > 0 && (
-            <div className="flex justify-between text-[10px] mt-1">
-              <span className="text-white/70">Remise</span>
-              <span className="font-bold">− {formatCurrency(invoice.discount)}</span>
-            </div>
-          )}
-          {invoice.taxRate > 0 && (
-            <div className="flex justify-between text-[10px] mt-1">
-              <span className="text-white/70">TVA ({invoice.taxRate}%)</span>
-              <span className="font-bold">+ {formatCurrency(taxAmount)}</span>
-            </div>
-          )}
           <div className="h-px bg-white/20 my-2.5" />
           <div className="flex justify-between items-end">
             <span className="text-[10px] font-bold text-white/70 tracking-wider">À PAYER</span>

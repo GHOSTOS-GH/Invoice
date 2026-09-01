@@ -1,0 +1,902 @@
+     1→"use client";
+     2→// CSV Import screen — drop zone, PapaParse parsing, column mapping,
+     3→// replace/merge choice, validation summary, progress + import via saveInvoice.
+     4→
+     5→import { useCallback, useMemo, useRef, useState } from "react";
+     6→import Papa from "papaparse";
+     7→import {
+     8→  saveInvoice,
+     9→  deleteInvoice,
+    10→  useInvoices,
+    11→} from "@/lib/data-hooks";
+    12→import { useNav } from "@/components/app-shell";
+    13→import {
+    14→  ScreenHeader,
+    15→  SectionCard,
+    16→  EmptyState,
+    17→} from "@/components/shared/ui";
+    18→import { Button } from "@/components/ui/button";
+    19→import { Input } from "@/components/ui/input";
+    20→import { Label } from "@/components/ui/label";
+    21→import {
+    22→  Select,
+    23→  SelectContent,
+    24→  SelectItem,
+    25→  SelectTrigger,
+    26→  SelectValue,
+    27→} from "@/components/ui/select";
+    28→import {
+    29→  RadioGroup,
+    30→  RadioGroupItem,
+    31→} from "@/components/ui/radio-group";
+    32→import { Progress } from "@/components/ui/progress";
+    33→import { Badge } from "@/components/ui/badge";
+    34→import {
+    35→  UploadCloud,
+    36→  FileSpreadsheet,
+    37→  ArrowLeft,
+    38→  CheckCircle2,
+    39→  AlertTriangle,
+    40→  Loader2,
+    41→  FileUp,
+    42→  X,
+    43→  Database,
+    44→  Plus,
+    45→  RefreshCw,
+    46→} from "lucide-react";
+    47→import { INVOICE_STATUSES, type InvoiceStatus } from "@/lib/constants";
+    48→import { toast } from "sonner";
+    49→import { cn } from "@/lib/utils";
+    50→import type { Invoice, InvoiceItem } from "@/lib/types";
+    51→
+    52→// ---------- Field definitions ----------
+    53→
+    54→type ImportField =
+    55→  | "client_name"
+    56→  | "item_name"
+    57→  | "quantity"
+    58→  | "unit_price"
+    59→  | "discount"
+    60→  | "tax_rate"
+    61→  | "status"
+    62→  | "notes"
+    63→  | "created_at"
+    64→  | "ref";
+    65→
+    66→interface FieldDef {
+    67→  key: ImportField;
+    68→  label: string;
+    69→  required: boolean;
+    70→  description: string;
+    71→}
+    72→
+    73→const FIELD_DEFS: FieldDef[] = [
+    74→  { key: "client_name", label: "Client", required: true, description: "Nom du client" },
+    75→  { key: "item_name", label: "Article", required: true, description: "Nom de l'article" },
+    76→  { key: "quantity", label: "Quantité", required: true, description: "Quantité (nombre)" },
+    77→  { key: "unit_price", label: "Prix unitaire", required: true, description: "Prix unitaire (FCFA)" },
+    78→  { key: "discount", label: "Remise", required: false, description: "Remise (FCFA)" },
+    79→  { key: "tax_rate", label: "Taux TVA (%)", required: false, description: "Taux de taxe" },
+    80→  { key: "status", label: "Statut", required: false, description: "enCours / livree / …" },
+    81→  { key: "notes", label: "Notes", required: false, description: "Notes de la facture" },
+    82→  { key: "created_at", label: "Date", required: false, description: "Date de création" },
+    83→  { key: "ref", label: "Référence", required: false, description: "Regroupe les lignes d'une même facture" },
+    84→];
+    85→
+    86→// Helpers to coerce CSV string values into typed values
+    87→
+    88→function parseNumber(raw: string | undefined, fallback = 0): number {
+    89→  if (!raw) return fallback;
+    90→  // Accept "1 250,50" or "1,250.50" or "1250.5"
+    91→  let s = String(raw).trim();
+    92→  if (!s) return fallback;
+    93→  // Remove spaces and thousands separators
+    94→  s = s.replace(/\s/g, "");
+    95→  // French style: 1250,50 → 1250.50
+    96→  if (s.indexOf(",") !== -1 && s.indexOf(".") === -1) {
+    97→    s = s.replace(",", ".");
+    98→  } else if (s.indexOf(",") !== -1 && s.indexOf(".") !== -1) {
+    99→    // Both present: assume , is thousands
+   100→    s = s.replace(/,/g, "");
+   101→  }
+   102→  const n = Number(s);
+   103→  return Number.isFinite(n) ? n : fallback;
+   104→}
+   105→
+   106→function parseStatus(raw: string | undefined): InvoiceStatus {
+   107→  if (!raw) return "enCours";
+   108→  const v = String(raw).trim().toLowerCase();
+   109→  if (v === "encours" || v === "en cours" || v === "en_cours") return "enCours";
+   110→  if (v === "enlivraison" || v === "en livraison" || v === "en_livraison") return "enLivraison";
+   111→  if (v === "livree" || v === "livrée" || v === "livre") return "livree";
+   112→  if (v === "archivee" || v === "archivée" || v === "archive") return "archivee";
+   113→  // English fallbacks
+   114→  if (v === "pending" || v === "draft") return "enCours";
+   115→  if (v === "delivered" || v === "paid") return "livree";
+   116→  if (v === "archived") return "archivee";
+   117→  return "enCours";
+   118→}
+   119→
+   120→function parseDate(raw: string | undefined): string {
+   121→  if (!raw) return new Date().toISOString();
+   122→  const v = String(raw).trim();
+   123→  if (!v) return new Date().toISOString();
+   124→  // dd/MM/yyyy or dd/MM/yyyy à HH:mm
+   125→  const m = v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[^\d]+(\d{1,2}):(\d{2}))?/);
+   126→  if (m) {
+   127→    const [, dd, mm, yyyy, hh, mi] = m;
+   128→    const d = new Date(
+   129→      Number(yyyy),
+   130→      Number(mm) - 1,
+   131→      Number(dd),
+   132→      hh ? Number(hh) : 0,
+   133→      mi ? Number(mi) : 0
+   134→    );
+   135→    if (!isNaN(d.getTime())) return d.toISOString();
+   136→  }
+   137→  const parsed = new Date(v);
+   138→  if (!isNaN(parsed.getTime())) return parsed.toISOString();
+   139→  return new Date().toISOString();
+   140→}
+   141→
+   142→// ---------- Component ----------
+   143→
+   144→interface ParsedRow {
+   145→  [key: string]: string;
+   146→}
+   147→
+   148→interface InvoiceGroup {
+   149→  ref: string;
+   150→  clientName: string;
+   151→  status: InvoiceStatus;
+   152→  notes: string;
+   153→  createdAt: string;
+   154→  discount: number;
+   155→  taxRate: number;
+   156→  items: { name: string; quantity: number; unitPrice: number }[];
+   157→}
+   158→
+   159→let _importItemCounter = 0;
+   160→function genItemId() {
+   161→  _importItemCounter++;
+   162→  return `item_csv_${Date.now().toString(36)}_${_importItemCounter}`;
+   163→}
+   164→
+   165→function genInvoiceId() {
+   166→  return `inv_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+   167→}
+   168→
+   169→export function CsvImportScreen() {
+   170→  const { navigate } = useNav();
+   171→  const { invoices: existingInvoices, refresh } = useInvoices();
+   172→
+   173→  const [fileName, setFileName] = useState<string | null>(null);
+   174→  const [columns, setColumns] = useState<string[]>([]);
+   175→  const [rows, setRows] = useState<ParsedRow[]>([]);
+   176→  const [parseError, setParseError] = useState<string | null>(null);
+   177→  const [parsing, setParsing] = useState(false);
+   178→  const [dragOver, setDragOver] = useState(false);
+   179→
+   180→  const [mapping, setMapping] = useState<Partial<Record<ImportField, string>>>(
+   181→    {}
+   182→  );
+   183→  const [mode, setMode] = useState<"merge" | "replace">("merge");
+   184→  const [importing, setImporting] = useState(false);
+   185→  const [progress, setProgress] = useState(0);
+   186→  const [progressLabel, setProgressLabel] = useState("");
+   187→  const fileInputRef = useRef<HTMLInputElement>(null);
+   188→
+   189→  // Auto-detect column mapping when a new file is parsed
+   190→  const autoDetectMapping = useCallback((cols: string[]) => {
+   191→    const lower = cols.map((c) => ({
+   192→      raw: c,
+   193→      norm: c
+   194→        .toLowerCase()
+   195→        .normalize("NFD")
+   196→        .replace(/[\u0300-\u036f]/g, "")
+   197→        .trim(),
+   198→    }));
+   199→    const find = (patterns: string[]): string | undefined => {
+   200→      for (const p of patterns) {
+   201→        const hit = lower.find((c) => c.norm === p);
+   202→        if (hit) return hit.raw;
+   203→      }
+   204→      for (const p of patterns) {
+   205→        const hit = lower.find((c) => c.norm.includes(p));
+   206→        if (hit) return hit.raw;
+   207→      }
+   208→      return undefined;
+   209→    };
+   210→    const next: Partial<Record<ImportField, string>> = {
+   211→      client_name: find(["client", "nom"]),
+   212→      item_name: find(["article", "produit", "designation", "libelle", "description"]),
+   213→      quantity: find(["quantite", "qte", "qty"]),
+   214→      unit_price: find(["prix unitaire", "prix", "pu", "unit price", "price"]),
+   215→      discount: find(["remise", "discount", "rabais"]),
+   216→      tax_rate: find(["tva", "tax", "taxe", "taux"]),
+   217→      status: find(["statut", "status", "etat"]),
+   218→      notes: find(["note", "notes", "observation"]),
+   219→      created_at: find(["date", "cree le", "created"]),
+   220→      ref: find(["ref", "reference", "n facture", "facture", "numero"]),
+   221→    };
+   222→    setMapping(next);
+   223→  }, []);
+   224→
+   225→  const handleFile = useCallback(
+   226→    (file: File) => {
+   227→      if (!file.name.toLowerCase().endsWith(".csv") && file.type !== "text/csv") {
+   228→        toast.error("Veuillez sélectionner un fichier .csv");
+   229→        return;
+   230→      }
+   231→      setParsing(true);
+   232→      setParseError(null);
+   233→      setFileName(file.name);
+   234→      Papa.parse<ParsedRow>(file, {
+   235→        header: true,
+   236→        skipEmptyLines: true,
+   237→        transformHeader: (h) => h.trim(),
+   238→        complete: (results) => {
+   239→          setParsing(false);
+   240→          if (results.errors.length > 0) {
+   241→            const first = results.errors[0];
+   242→            setParseError(
+   243→              `Ligne ${first.row ?? "?"}: ${first.message || "erreur de parsing"}`
+   244→            );
+   245→          }
+   246→          const cols = results.meta.fields?.filter((f) => f) || [];
+   247→          const data = (results.data || []).filter(
+   248→            (r) => Object.values(r).some((v) => v && String(v).trim())
+   249→          );
+   250→          if (cols.length === 0) {
+   251→            setParseError("Aucune colonne détectée. Vérifiez l'en-tête du fichier.");
+   252→            setColumns([]);
+   253→            setRows([]);
+   254→            return;
+   255→          }
+   256→          if (data.length === 0) {
+   257→            setParseError("Aucune ligne de donnée trouvée dans le fichier.");
+   258→          }
+   259→          setColumns(cols);
+   260→          setRows(data);
+   261→          autoDetectMapping(cols);
+   262→          toast.success(
+   263→            `${data.length} ligne(s) · ${cols.length} colonne(s) détectée(s)`
+   264→          );
+   265→        },
+   266→        error: (err: any) => {
+   267→          setParsing(false);
+   268→          setParseError(err?.message || "Échec du parsing CSV");
+   269→        },
+   270→      });
+   271→    },
+   272→    [autoDetectMapping]
+   273→  );
+   274→
+   275→  const handleDrop = (e: React.DragEvent) => {
+   276→    e.preventDefault();
+   277→    setDragOver(false);
+   278→    const file = e.dataTransfer.files?.[0];
+   279→    if (file) handleFile(file);
+   280→  };
+   281→
+   282→  const handleBrowseClick = () => fileInputRef.current?.click();
+   283→
+   284→  const handleBrowseChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+   285→    const file = e.target.files?.[0];
+   286→    if (file) handleFile(file);
+   287→    if (fileInputRef.current) fileInputRef.current.value = "";
+   288→  };
+   289→
+   290→  const resetFile = () => {
+   291→    setFileName(null);
+   292→    setColumns([]);
+   293→    setRows([]);
+   294→    setMapping({});
+   295→    setParseError(null);
+   296→    setProgress(0);
+   297→    setProgressLabel("");
+   298→  };
+   299→
+   300→  // ---------- Build invoice groups from rows + mapping ----------
+   301→
+   302→  const groups: InvoiceGroup[] = useMemo(() => {
+   303→    if (rows.length === 0) return [];
+   304→    const requiredFields: ImportField[] = ["client_name", "item_name"];
+   305→    for (const f of requiredFields) {
+   306→      if (!mapping[f]) return [];
+   307→    }
+   308→    const refCol = mapping.ref;
+   309→    const clientCol = mapping.client_name!;
+   310→    const itemCol = mapping.item_name!;
+   311→    const qtyCol = mapping.quantity;
+   312→    const priceCol = mapping.unit_price;
+   313→    const discountCol = mapping.discount;
+   314→    const taxCol = mapping.tax_rate;
+   315→    const statusCol = mapping.status;
+   316→    const notesCol = mapping.notes;
+   317→    const dateCol = mapping.created_at;
+   318→
+   319→    const groupMap = new Map<string, InvoiceGroup>();
+   320→    let i = 0;
+   321→    for (const row of rows) {
+   322→      const clientName = (clientCol ? row[clientCol] : "").trim();
+   323→      const itemName = (itemCol ? row[itemCol] : "").trim();
+   324→      if (!clientName && !itemName) continue;
+   325→      // Group key: ref if mapped else client+date fallback to per-row unique
+   326→      const ref = refCol && row[refCol]?.trim()
+   327→        ? row[refCol].trim()
+   328→        : `auto_${i}_${clientName}`;
+   329→      const createdAt = dateCol ? parseDate(row[dateCol]) : new Date().toISOString();
+   330→      if (!groupMap.has(ref)) {
+   331→        groupMap.set(ref, {
+   332→          ref,
+   333→          clientName: clientName || "Client inconnu",
+   334→          status: statusCol ? parseStatus(row[statusCol]) : "enCours",
+   335→          notes: notesCol ? (row[notesCol] || "").trim() : "",
+   336→          createdAt,
+   337→          discount: discountCol ? parseNumber(row[discountCol], 0) : 0,
+   338→          taxRate: taxCol ? parseNumber(row[taxCol], 0) : 0,
+   339→          items: [],
+   340→        });
+   341→      }
+   342→      const g = groupMap.get(ref)!;
+   343→      g.items.push({
+   344→        name: itemName || "Article",
+   345→        quantity: qtyCol ? Math.max(1, Math.round(parseNumber(row[qtyCol], 1))) : 1,
+   346→        unitPrice: priceCol ? parseNumber(row[priceCol], 0) : 0,
+   347→      });
+   348→      i++;
+   349→    }
+   350→    return Array.from(groupMap.values());
+   351→  }, [rows, mapping]);
+   352→
+   353→  const totalItems = useMemo(
+   354→    () => groups.reduce((s, g) => s + g.items.length, 0),
+   355→    [groups]
+   356→  );
+   357→
+   358→  const missingRequired = FIELD_DEFS.filter(
+   359→    (f) => f.required && !mapping[f.key]
+   360→  );
+   361→
+   362→  const canImport =
+   363→    !importing &&
+   364→    groups.length > 0 &&
+   365→    missingRequired.length === 0;
+   366→
+   367→  // ---------- Import ----------
+   368→
+   369→  const handleImport = async () => {
+   370→    if (!canImport) {
+   371→      if (missingRequired.length > 0) {
+   372→        toast.error(
+   373→          `Champs obligatoires manquants : ${missingRequired
+   374→            .map((f) => f.label)
+   375→            .join(", ")}`
+   376→        );
+   377→      }
+   378→      return;
+   379→    }
+   380→
+   381→    // Confirm destructive replace mode
+   382→    if (mode === "replace" && existingInvoices.length > 0) {
+   383→      const ok = window.confirm(
+   384→        `Remplacer toutes les données ? Cela supprimera ${existingInvoices.length} facture(s) existante(s) avant l'import.`
+   385→      );
+   386→      if (!ok) return;
+   387→    }
+   388→
+   389→    setImporting(true);
+   390→    setProgress(0);
+   391→    setProgressLabel("Initialisation…");
+   392→
+   393→    try {
+   394→      const total =
+   395→        (mode === "replace" ? existingInvoices.length : 0) + groups.length;
+   396→      let done = 0;
+   397→
+   398→      if (mode === "replace") {
+   399→        setProgressLabel("Suppression des factures existantes…");
+   400→        for (const inv of existingInvoices) {
+   401→          try {
+   402→            await deleteInvoice(inv.id);
+   403→          } catch {}
+   404→          done++;
+   405→          setProgress(Math.round((done / total) * 100));
+   406→        }
+   407→      }
+   408→
+   409→      let imported = 0;
+   410→      let idx = 0;
+   411→      for (const g of groups) {
+   412→        idx++;
+   413→        setProgressLabel(
+   414→          `Création facture ${idx}/${groups.length} — ${g.clientName}`
+   415→        );
+   416→        const items: InvoiceItem[] = g.items.map((it) => ({
+   417→          id: genItemId(),
+   418→          name: it.name,
+   419→          quantity: it.quantity,
+   420→          unitPrice: it.unitPrice,
+   421→        }));
+   422→        const invoice: Partial<Invoice> & {
+   423→          id: string;
+   424→          clientName: string;
+   425→          items: InvoiceItem[];
+   426→        } = {
+   427→          id: genInvoiceId(),
+   428→          clientName: g.clientName,
+   429→          status: g.status,
+   430→          notes: g.notes || null,
+   431→          discount: g.discount,
+   432→          taxRate: g.taxRate,
+   433→          items,
+   434→          createdAt: g.createdAt,
+   435→          updatedAt: new Date().toISOString(),
+   436→        };
+   437→        try {
+   438→          await saveInvoice(invoice);
+   439→          imported++;
+   440→        } catch (err: any) {
+   441→          console.error("Import failed for one invoice", err);
+   442→        }
+   443→        done++;
+   444→        setProgress(Math.round((done / total) * 100));
+   445→        // Yield to the UI thread for smoother progress updates
+   446→        await new Promise((r) => setTimeout(r, 5));
+   447→      }
+   448→
+   449→      setProgress(100);
+   450→      setProgressLabel("Terminé");
+   451→      await refresh();
+   452→      toast.success(
+   453→        `${imported} facture(s) importée(s) · ${totalItems} article(s)`
+   454→      );
+   455→      navigate("invoices");
+   456→    } catch (err: any) {
+   457→      toast.error(err?.message || "Échec de l'import");
+   458→    } finally {
+   459→      setImporting(false);
+   460→    }
+   461→  };
+   462→
+   463→  // ---------- Render ----------
+   464→
+   465→  return (
+   466→    <div className="min-h-screen flex flex-col">
+   467→      <ScreenHeader
+   468→        title="Import CSV"
+   469→        subtitle="Créer des factures depuis un fichier CSV"
+   470→        icon={UploadCloud}
+   471→        actions={
+   472→          <Button
+   473→            variant="ghost"
+   474→            size="sm"
+   475→            className="rounded-xl text-slate-600"
+   476→            onClick={() => navigate("invoices")}
+   477→            disabled={importing}
+   478→          >
+   479→            <ArrowLeft className="w-4 h-4" />
+   480→            <span className="hidden sm:inline">Retour</span>
+   481→          </Button>
+   482→        }
+   483→      />
+   484→
+   485→      <div className="flex-1 px-4 sm:px-6 py-4 sm:py-6 max-w-5xl w-full mx-auto space-y-4">
+   486→        {/* Step 1: drop zone */}
+   487→        <SectionCard title="1. Choisir un fichier CSV">
+   488→          {!fileName ? (
+   489→            <div
+   490→              onDragOver={(e) => {
+   491→                e.preventDefault();
+   492→                setDragOver(true);
+   493→              }}
+   494→              onDragLeave={() => setDragOver(false)}
+   495→              onDrop={handleDrop}
+   496→              onClick={handleBrowseClick}
+   497→              role="button"
+   498→              tabIndex={0}
+   499→              onKeyDown={(e) => {
+   500→                if (e.key === "Enter" || e.key === " ") handleBrowseClick();
+   501→              }}
+   502→              className={cn(
+   503→                "border-2 border-dashed rounded-2xl p-8 sm:p-12 text-center cursor-pointer transition-all",
+   504→                dragOver
+   505→                  ? "border-[#2563EB] bg-[#2563EB]/5"
+   506→                  : "border-slate-300 bg-slate-50/40 hover:border-[#2563EB]/60 hover:bg-[#2563EB]/[0.03]"
+   507→              )}
+   508→            >
+   509→              <input
+   510→                ref={fileInputRef}
+   511→                type="file"
+   512→                accept=".csv,text/csv"
+   513→                className="hidden"
+   514→                onChange={handleBrowseChange}
+   515→              />
+   516→              <div
+   517→                className={cn(
+   518→                  "w-16 h-16 mx-auto rounded-2xl flex items-center justify-center mb-4 transition-colors",
+   519→                  dragOver
+   520→                    ? "bg-[#2563EB] text-white"
+   521→                    : "bg-white text-[#2563EB] border border-slate-200"
+   522→                )}
+   523→              >
+   524→                {parsing ? (
+   525→                  <Loader2 className="w-7 h-7 animate-spin" />
+   526→                ) : (
+   527→                  <UploadCloud className="w-7 h-7" />
+   528→                )}
+   529→              </div>
+   530→              <p className="text-[15px] font-bold text-slate-900">
+   531→                {parsing
+   532→                  ? "Analyse du fichier…"
+   533→                  : dragOver
+   534→                  ? "Déposez le fichier ici"
+   535→                  : "Glissez-déposez un fichier CSV"}
+   536→              </p>
+   537→              <p className="text-[13px] text-slate-500 mt-1">
+   538→                ou{" "}
+   539→                <span className="text-[#2563EB] font-semibold underline">
+   540→                  cliquez pour parcourir
+   541→                </span>
+   542→              </p>
+   543→              <p className="text-[11.5px] text-slate-400 mt-3">
+   544→                Format attendu : .csv avec en-tête (première ligne).
+   545→              </p>
+   546→            </div>
+   547→          ) : (
+   548→            <div className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 border border-slate-200">
+   549→              <div className="w-10 h-10 rounded-xl bg-[#2563EB]/10 flex items-center justify-center shrink-0">
+   550→                <FileSpreadsheet className="w-5 h-5 text-[#2563EB]" />
+   551→              </div>
+   552→              <div className="flex-1 min-w-0">
+   553→                <p className="text-[14px] font-semibold text-slate-900 truncate">
+   554→                  {fileName}
+   555→                </p>
+   556→                <p className="text-[12px] text-slate-500">
+   557→                  {rows.length} ligne(s) · {columns.length} colonne(s)
+   558→                </p>
+   559→              </div>
+   560→              <Button
+   561→                variant="ghost"
+   562→                size="sm"
+   563→                className="rounded-lg text-slate-500 hover:text-red-600"
+   564→                onClick={resetFile}
+   565→                disabled={importing}
+   566→              >
+   567→                <X className="w-4 h-4" />
+   568→              </Button>
+   569→            </div>
+   570→          )}
+   571→          {parseError && (
+   572→            <div className="mt-3 rounded-xl border border-red-200 bg-red-50 p-3 flex items-start gap-2">
+   573→              <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+   574→              <p className="text-[13px] text-red-700">{parseError}</p>
+   575→            </div>
+   576→          )}
+   577→        </SectionCard>
+   578→
+   579→        {/* Step 2: preview */}
+   580→        {rows.length > 0 && (
+   581→          <SectionCard
+   582→            title="2. Aperçu des premières lignes"
+   583→            action={
+   584→              <Badge variant="secondary" className="rounded-full">
+   585→                {rows.length} lignes
+   586→              </Badge>
+   587→            }
+   588→          >
+   589→            <div className="overflow-x-auto -mx-1">
+   590→              <table className="w-full text-[12.5px] border-collapse">
+   591→                <thead>
+   592→                  <tr>
+   593→                    {columns.map((c) => (
+   594→                      <th
+   595→                        key={c}
+   596→                        className="text-left font-semibold text-slate-600 px-2 py-2 border-b border-slate-200 whitespace-nowrap"
+   597→                      >
+   598→                        {c}
+   599→                      </th>
+   600→                    ))}
+   601→                  </tr>
+   602→                </thead>
+   603→                <tbody>
+   604→                  {rows.slice(0, 5).map((r, i) => (
+   605→                    <tr key={i} className="hover:bg-slate-50">
+   606→                      {columns.map((c) => (
+   607→                        <td
+   608→                          key={c}
+   609→                          className="px-2 py-2 border-b border-slate-100 text-slate-700 whitespace-nowrap max-w-[220px] truncate"
+   610→                        >
+   611→                          {r[c] || (
+   612→                            <span className="text-slate-300">—</span>
+   613→                          )}
+   614→                        </td>
+   615→                      ))}
+   616→                    </tr>
+   617→                  ))}
+   618→                </tbody>
+   619→              </table>
+   620→            </div>
+   621→            <p className="text-[12px] text-slate-400 mt-2">
+   622→              Aperçu des 5 premières lignes sur {rows.length}.
+   623→            </p>
+   624→          </SectionCard>
+   625→        )}
+   626→
+   627→        {/* Step 3: column mapping */}
+   628→        {columns.length > 0 && (
+   629→          <SectionCard
+   630→            title="3. Mapping des colonnes"
+   631→            action={
+   632→              <Button
+   633→                variant="ghost"
+   634→                size="sm"
+   635→                className="rounded-lg text-[#2563EB]"
+   636→                onClick={() => autoDetectMapping(columns)}
+   637→                disabled={importing}
+   638→              >
+   639→                <RefreshCw className="w-3.5 h-3.5" />
+   640→                Auto-détection
+   641→              </Button>
+   642→            }
+   643→          >
+   644→            <div className="grid sm:grid-cols-2 gap-3">
+   645→              {FIELD_DEFS.map((f) => {
+   646→                const value = mapping[f.key] || "__none__";
+   647→                return (
+   648→                  <div
+   649→                    key={f.key}
+   650→                    className="rounded-xl border border-slate-200 p-3"
+   651→                  >
+   652→                    <div className="flex items-center gap-2 mb-2">
+   653→                      <Label
+   654→                        htmlFor={`map-${f.key}`}
+   655→                        className="text-[13px] font-semibold text-slate-800"
+   656→                      >
+   657→                        {f.label}
+   658→                      </Label>
+   659→                      {f.required ? (
+   660→                        <Badge
+   661→                          variant="secondary"
+   662→                          className="rounded-full text-[10px] py-0 px-1.5 bg-red-100 text-red-700"
+   663→                        >
+   664→                          requis
+   665→                        </Badge>
+   666→                      ) : (
+   667→                        <span className="text-[10px] text-slate-400">
+   668→                          optionnel
+   669→                        </span>
+   670→                      )}
+   671→                    </div>
+   672→                    <p className="text-[11.5px] text-slate-500 mb-2">
+   673→                      {f.description}
+   674→                    </p>
+   675→                    <Select
+   676→                      value={value}
+   677→                      onValueChange={(v) =>
+   678→                        setMapping((prev) => ({
+   679→                          ...prev,
+   680→                          [f.key]: v === "__none__" ? undefined : v,
+   681→                        }))
+   682→                      }
+   683→                      disabled={importing}
+   684→                    >
+   685→                      <SelectTrigger
+   686→                        id={`map-${f.key}`}
+   687→                        className="w-full rounded-xl"
+   688→                      >
+   689→                        <SelectValue placeholder="— Aucune —" />
+   690→                      </SelectTrigger>
+   691→                      <SelectContent>
+   692→                        <SelectItem value="__none__">— Aucune —</SelectItem>
+   693→                        {columns.map((c) => (
+   694→                          <SelectItem key={c} value={c}>
+   695→                            {c}
+   696→                          </SelectItem>
+   697→                        ))}
+   698→                      </SelectContent>
+   699→                    </Select>
+   700→                  </div>
+   701→                );
+   702→              })}
+   703→            </div>
+   704→          </SectionCard>
+   705→        )}
+   706→
+   707→        {/* Step 4: mode + validation */}
+   708→        {columns.length > 0 && (
+   709→          <SectionCard title="4. Mode d'import">
+   710→            <RadioGroup
+   711→              value={mode}
+   712→              onValueChange={(v) => setMode(v as "merge" | "replace")}
+   713→              className="grid gap-2"
+   714→              disabled={importing}
+   715→            >
+   716→              <label
+   717→                htmlFor="mode-merge"
+   718→                className={cn(
+   719→                  "flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-colors",
+   720→                  mode === "merge"
+   721→                    ? "border-[#2563EB] bg-[#2563EB]/5"
+   722→                    : "border-slate-200 hover:bg-slate-50"
+   723→                )}
+   724→              >
+   725→                <RadioGroupItem
+   726→                  id="mode-merge"
+   727→                  value="merge"
+   728→                  className="mt-0.5"
+   729→                />
+   730→                <div className="flex-1">
+   731→                  <div className="flex items-center gap-2">
+   732→                    <Plus className="w-4 h-4 text-[#2563EB]" />
+   733→                    <span className="text-[14px] font-semibold text-slate-900">
+   734→                      Ajouter / fusionner avec l'existant
+   735→                    </span>
+   736→                  </div>
+   737→                  <p className="text-[12.5px] text-slate-500 mt-0.5 leading-snug">
+   738→                    Les nouvelles factures sont ajoutées aux données actuelles.
+   739→                    Recommandé pour la plupart des cas.
+   740→                  </p>
+   741→                </div>
+   742→              </label>
+   743→              <label
+   744→                htmlFor="mode-replace"
+   745→                className={cn(
+   746→                  "flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-colors",
+   747→                  mode === "replace"
+   748→                    ? "border-red-400 bg-red-50"
+   749→                    : "border-slate-200 hover:bg-slate-50"
+   750→                )}
+   751→              >
+   752→                <RadioGroupItem
+   753→                  id="mode-replace"
+   754→                  value="replace"
+   755→                  className="mt-0.5"
+   756→                />
+   757→                <div className="flex-1">
+   758→                  <div className="flex items-center gap-2">
+   759→                    <RefreshCw className="w-4 h-4 text-red-600" />
+   760→                    <span className="text-[14px] font-semibold text-slate-900">
+   761→                      Remplacer toutes les données
+   762→                    </span>
+   763→                  </div>
+   764→                  <p className="text-[12.5px] text-red-600/80 mt-0.5 leading-snug">
+   765→                    Supprime les {existingInvoices.length} facture(s)
+   766→                    existante(s) avant l'import. Action irréversible.
+   767→                  </p>
+   768→                </div>
+   769→              </label>
+   770→            </RadioGroup>
+   771→
+   772→            {/* Validation summary */}
+   773→            <div className="mt-4 rounded-xl bg-slate-50 border border-slate-200 p-3">
+   774→              <div className="flex items-center gap-2 text-slate-700">
+   775→                <Database className="w-4 h-4 text-[#2563EB]" />
+   776→                <span className="text-[13.5px] font-semibold">
+   777→                  Résumé de l'import
+   778→                </span>
+   779→              </div>
+   780→              <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-2 text-[13px]">
+   781→                <SummaryItem
+   782→                  label="Factures à importer"
+   783→                  value={String(groups.length)}
+   784→                  ok={groups.length > 0}
+   785→                />
+   786→                <SummaryItem
+   787→                  label="Articles"
+   788→                  value={String(totalItems)}
+   789→                  ok={totalItems > 0}
+   790→                />
+   791→                <SummaryItem
+   792→                  label="Mode"
+   793→                  value={mode === "merge" ? "Fusionner" : "Remplacer"}
+   794→                  ok
+   795→                />
+   796→              </div>
+   797→              {missingRequired.length > 0 && (
+   798→                <div className="mt-3 flex items-start gap-2 text-[12.5px] text-red-700">
+   799→                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+   800→                  <span>
+   801→                    Champs obligatoires manquants :{" "}
+   802→                    <strong>
+   803→                      {missingRequired.map((f) => f.label).join(", ")}
+   804→                    </strong>
+   805→                    .
+   806→                  </span>
+   807→                </div>
+   808→              )}
+   809→              {groups.length === 0 &&
+   810→                missingRequired.length === 0 &&
+   811→                rows.length > 0 && (
+   812→                  <p className="mt-3 text-[12.5px] text-amber-700">
+   813→                    Aucune facture à importer à partir des colonnes mappées.
+   814→                  </p>
+   815→                )}
+   816→            </div>
+   817→          </SectionCard>
+   818→        )}
+   819→
+   820→        {/* Progress */}
+   821→        {importing && (
+   822→          <SectionCard title="Import en cours">
+   823→            <div className="space-y-2">
+   824→              <Progress value={progress} className="h-2.5" />
+   825→              <div className="flex items-center justify-between text-[12.5px]">
+   826→                <span className="text-slate-600 flex items-center gap-1.5">
+   827→                  <Loader2 className="w-3.5 h-3.5 animate-spin text-[#2563EB]" />
+   828→                  {progressLabel}
+   829→                </span>
+   830→                <span className="font-semibold text-slate-700">{progress}%</span>
+   831→              </div>
+   832→            </div>
+   833→          </SectionCard>
+   834→        )}
+   835→
+   836→        {/* Action buttons */}
+   837→        {columns.length > 0 && (
+   838→          <div className="flex flex-col sm:flex-row gap-2 sm:justify-end pb-4">
+   839→            <Button
+   840→              variant="outline"
+   841→              className="rounded-xl"
+   842→              onClick={() => navigate("invoices")}
+   843→              disabled={importing}
+   844→            >
+   845→              <ArrowLeft className="w-4 h-4" />
+   846→              Annuler
+   847→            </Button>
+   848→            <Button
+   849→              className="rounded-xl bg-[#2563EB] hover:bg-[#1D4ED8] text-white px-5"
+   850→              onClick={handleImport}
+   851→              disabled={!canImport}
+   852→            >
+   853→              {importing ? (
+   854→                <Loader2 className="w-4 h-4 animate-spin" />
+   855→              ) : (
+   856→                <CheckCircle2 className="w-4 h-4" />
+   857→              )}
+   858→              Importer {groups.length > 0 ? `(${groups.length})` : ""}
+   859→            </Button>
+   860→          </div>
+   861→        )}
+   862→
+   863→        {columns.length === 0 && !fileName && (
+   864→          <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-4">
+   865→            <EmptyState
+   866→              icon={FileUp}
+   867→              title="Aucun fichier chargé"
+   868→              description="Déposez un fichier CSV ci-dessus pour démarrer l'import. Les colonnes seront détectées automatiquement et vous pourrez les mapper aux champs de facture."
+   869→            />
+   870→          </div>
+   871→        )}
+   872→      </div>
+   873→    </div>
+   874→  );
+   875→}
+   876→
+   877→function SummaryItem({
+   878→  label,
+   879→  value,
+   880→  ok,
+   881→}: {
+   882→  label: string;
+   883→  value: string;
+   884→  ok?: boolean;
+   885→}) {
+   886→  return (
+   887→    <div className="rounded-lg bg-white border border-slate-200 px-3 py-2">
+   888→      <p className="text-[11px] text-slate-500 uppercase tracking-wide">
+   889→        {label}
+   890→      </p>
+   891→      <p
+   892→        className={cn(
+   893→          "text-[15px] font-bold",
+   894→          ok ? "text-slate-900" : "text-red-600"
+   895→        )}
+   896→      >
+   897→        {value}
+   898→      </p>
+   899→    </div>
+   900→  );
+   901→}
+   902→

@@ -41,7 +41,7 @@ export async function PUT(
     }
     const { id } = await params;
     const body = await req.json();
-    const { clientName, clientId, status, notes, discount, taxRate, items, createdAt } = body;
+    const { clientName, clientId, status, notes, items, createdAt } = body;
 
     // Upsert invoice + items in a transaction
     const saved = await db.$transaction(async (tx) => {
@@ -53,8 +53,6 @@ export async function PUT(
         clientId: clientId || null,
         status: status || "enCours",
         notes: notes ?? null,
-        discount: Number(discount) || 0,
-        taxRate: Number(taxRate) || 0,
         createdBy: user.id,
         updatedAt: new Date(),
       };

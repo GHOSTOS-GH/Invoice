@@ -6,8 +6,6 @@ import autoTable from "jspdf-autotable";
 import type { Invoice } from "./types";
 import {
   invoiceTotal,
-  invoiceTaxAmount,
-  invoicePayableTotal,
   invoiceTotalQuantity,
   itemSubtotal,
 } from "./types";
@@ -42,8 +40,6 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Blob> {
   const margin = 36;
 
   const total = invoiceTotal(invoice.items);
-  const taxAmount = invoiceTaxAmount(invoice);
-  const payable = invoicePayableTotal(invoice);
   const qty = invoiceTotalQuantity(invoice.items);
   const statusMeta = INVOICE_STATUS_META[invoice.status];
 
@@ -195,32 +191,9 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Blob> {
   doc.setFont("helvetica", "bold");
   doc.text(String(qty), boxX + boxW - 18, afterTableY + 95, { align: "right" });
 
-  if (invoice.discount > 0 || invoice.taxRate > 0) {
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(9);
-    doc.setTextColor(...COLORS.grey);
-    let y = afterTableY + boxH + 16;
-    if (invoice.discount > 0) {
-      doc.text("Remise:", boxX + 18, y);
-      doc.text(`- ${formatCurrency(invoice.discount)}`, boxX + boxW - 18, y, { align: "right" });
-      y += 14;
-    }
-    if (invoice.taxRate > 0) {
-      doc.text(`TVA (${invoice.taxRate}%):`, boxX + 18, y);
-      doc.text(`+ ${formatCurrency(taxAmount)}`, boxX + boxW - 18, y, { align: "right" });
-      y += 14;
-    }
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(13);
-    doc.setTextColor(...COLORS.dark);
-    doc.text("À PAYER:", boxX + 18, y);
-    doc.setTextColor(...COLORS.blue);
-    doc.text(formatCurrency(payable), boxX + boxW - 18, y, { align: "right" });
-  }
-
   // ---------- Notes ----------
   if (invoice.notes) {
-    const notesY = afterTableY + boxH + (invoice.discount > 0 || invoice.taxRate > 0 ? 60 : 20);
+    const notesY = afterTableY + boxH + 20;
     doc.setFillColor(255, 251, 239);
     doc.setDrawColor(252, 239, 192);
     doc.roundedRect(margin, notesY, pageWidth - margin * 2, 50, 8, 8, "FD");

@@ -1,7 +1,9 @@
 // GET/POST /api/products
+// GET: readable by employees+ (for invoice product picker)
+// POST: admin only (product catalog management)
 import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
-import { requireAuth, authErrorResponse } from "@/lib/auth";
+import { requireAuth, requireRole, authErrorResponse } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
@@ -21,10 +23,8 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const user = await requireAuth();
-    if (user.role === "client") {
-      return Response.json({ error: "Accès refusé" }, { status: 403 });
-    }
+    // Only admins can create products
+    const user = await requireRole("admin");
     const { name, category, imageUrl } = await req.json();
     if (!name?.trim()) {
       return Response.json({ error: "Le nom est requis" }, { status: 400 });

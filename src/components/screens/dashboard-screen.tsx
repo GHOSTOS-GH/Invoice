@@ -21,6 +21,10 @@ import {
   ShoppingBag,
   Clock,
   Sparkles,
+  BarChart3,
+  ShieldCheck,
+  Settings as SettingsIcon,
+  Upload,
 } from "lucide-react";
 import {
   INVOICE_STATUS_META,
@@ -186,6 +190,52 @@ export function DashboardScreen() {
             </div>
           </div>
         </div>
+
+        {/* Admin icon tiles — large clickable cards for admin-only screens */}
+        {user?.role === "admin" && (
+          <div>
+            <h3 className="text-[15px] font-bold text-slate-900 mb-3 flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4 text-purple-600" /> Espace Administration
+            </h3>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+              <AdminTile
+                icon={BarChart3}
+                label="Statistiques"
+                description="CA & graphiques"
+                color="#6366F1"
+                onClick={() => navigate("stats")}
+              />
+              <AdminTile
+                icon={Package}
+                label="Produits"
+                description="Catalogue"
+                color="#D97706"
+                onClick={() => navigate("products")}
+              />
+              <AdminTile
+                icon={Users}
+                label="Comptes"
+                description="Utilisateurs"
+                color="#2563EB"
+                onClick={() => navigate("users")}
+              />
+              <AdminTile
+                icon={SettingsIcon}
+                label="Réglages"
+                description="Boutique & maintenance"
+                color="#DB2777"
+                onClick={() => navigate("settings")}
+              />
+              <AdminTile
+                icon={Upload}
+                label="Import CSV"
+                description="Importer des factures"
+                color="#16A34A"
+                onClick={() => navigate("csv-import")}
+              />
+            </div>
+          </div>
+        )}
 
         {/* Quick action cards */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -418,5 +468,38 @@ function CatalogStat({
       </p>
       <p className="text-[11px] text-slate-400 mt-1">{label}</p>
     </div>
+  );
+}
+
+function AdminTile({
+  icon: Icon,
+  label,
+  description,
+  color,
+  onClick,
+}: {
+  icon: any;
+  label: string;
+  description: string;
+  color: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="group bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 flex flex-col items-center gap-3 hover:shadow-lg hover:-translate-y-1 transition-all"
+      style={{ borderRadius: 16 }}
+    >
+      <div
+        className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform"
+        style={{ backgroundColor: `${color}1A`, borderRadius: 16 }}
+      >
+        <Icon className="w-7 h-7 sm:w-8 sm:h-8" style={{ color }} />
+      </div>
+      <div className="text-center">
+        <p className="font-bold text-slate-900 text-[14px]">{label}</p>
+        <p className="text-[11px] text-slate-400 mt-0.5">{description}</p>
+      </div>
+    </button>
   );
 }

@@ -54,10 +54,26 @@ import {
   RefreshCw,
   Tag,
   Image as ImageIcon,
+  Download,
+  Upload,
+  FileText,
+  FileSpreadsheet,
 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import Papa from "papaparse";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import type { Product } from "@/lib/types";
+import {
+  exportCsv,
+  exportExcel,
+  productsToRows,
+} from "@/lib/export-utils";
 
 // ---------- Image compression helper ----------
 // Reads the file, downscales to maxDim on the longest side, and re-encodes as
@@ -390,6 +406,63 @@ export function ProductsScreen() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<ProductFormValues | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Product | null>(null);
+  const [importing, setImporting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleExportCsv = () => {
+    const date = new Date().toISOString().slice(0, 10);
+    exportCsv(productsToRows(products), `produits_${date}.csv`);
+    toast.success("Produits exportés en CSV");
+  };
+
+  const handleExportExcel = () => {
+    const date = new Date().toISOString().slice(0, 10);
+    exportExcel(productsToRows(products), `produits_${date}.xlsx`, "Produits");
+    toast.success("Produits exportés en Excel");
+  };
+
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImporting(true);
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: async (res) => {
+        try {
+          const rows = res.data as Record<string, string>[];
+          let count = 0;
+          for (const row of rows) {
+            const name = (row["Nom"] ?? row["name"] ?? "").trim();
+            const category = (row["Catégorie"] ?? row["category"] ?? "").trim();
+            if (!name || !category) continue;
+            const imageUrl = (row["Image URL"] ?? row["imageUrl"] ?? "").trim();
+            await createProduct({
+              name,
+              category,
+              imageUrl: imageUrl || undefined,
+            });
+            count++;
+          }
+          toast.success(`${count} produit(s) importé(s)`);
+          refresh();
+        } catch (err: any) {
+          toast.error(err.message || "Erreur lors de l'import");
+        } finally {
+          setImporting(false);
+          if (fileInputRef.current) fileInputRef.current.value = "";
+        }
+      },
+      error: (err) => {
+        toast.error(err.message || "Erreur de lecture du fichier");
+        setImporting(false);
+      },
+    });
+  };
 
   const categories = useMemo(() => {
     const set = new Set<string>();
@@ -453,7 +526,14 @@ export function ProductsScreen() {
         } au catalogue`}
         icon={Package}
         actions={
-          <>
+          <div className="flex items-center gap-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv,text/csv"
+              className="hidden"
+              onChange={handleImportFile}
+            />
             <Button
               variant="outline"
               size="sm"
@@ -464,13 +544,45 @@ export function ProductsScreen() {
               <RefreshCw className="w-4 h-4" />
             </Button>
             <Button
+              variant="outline"
+              size="sm"
+              onClick={handleImportClick}
+              disabled={importing}
+              className="rounded-xl h-9"
+            >
+              {importing ? (
+                <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+              ) : (
+                <Upload className="w-4 h-4 mr-1.5" />
+              )}
+              Importer CSV
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="rounded-xl h-9">
+                  <Download className="w-4 h-4 mr-1.5" />
+                  Exporter
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={handleExportCsv}>
+                  <FileText className="w-4 h-4 mr-2" />
+                  Exporter CSV
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleExportExcel}>
+                  <FileSpreadsheet className="w-4 h-4 mr-2" />
+                  Exporter Excel
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Button
               size="sm"
               onClick={openNew}
               className="rounded-xl h-9 bg-[#2563EB] hover:bg-[#1D4ED8]"
             >
               <Plus className="w-4 h-4 mr-1.5" /> Ajouter
             </Button>
-          </>
+          </div>
         }
       />
 
