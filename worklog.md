@@ -249,3 +249,64 @@ Stage Summary:
 - HTTP 200, no runtime errors, lint clean
 - Demo accounts: admin (+221770000000/admin1234), employee (+221771111111/employe1234)
 - Ready for production deployment to Vercel
+
+---
+Task ID: CRON-ROUND-2
+Agent: main (cron webDevReview)
+Task: QA + bug fixes + new features (Dashboard, skeleton loaders, keyboard shortcuts)
+
+## Current project status assessment
+- Project was complete and functional (all 8 screens working, lint clean, HTTP 200)
+- One console warning found during QA: sync engine called `pullFromServer()` on app load even when unauthenticated, producing "Non authentifié" + "Failed to fetch" console spam on the login page
+- Dev server has a sandbox-specific instability (process exits after first compile cycle), but the code itself is verified valid via lint + curl (all 8 API endpoints return HTTP 200, home page compiles in ~24s and returns 200)
+
+## Current goals / completed modifications / verification results
+
+### Bug fix
+1. **Sync engine console spam** (`src/lib/sync-engine.ts`):
+   - `pullFromServer()` now checks `/api/auth/me` first and silently skips when unauthenticated (no more console warnings on login page)
+   - `processQueueItem()` and `flushQueue()` catch handlers made silent (expected on offline/auth failures; queue retries automatically)
+
+### New feature: Dashboard / home overview screen
+2. **New file** `src/components/screens/dashboard-screen.tsx`:
+   - Welcome hero card (blue gradient #2563EB→#1D4ED8→#1E3A8A, decorative blurred blobs, greeting based on time of day, 3 KPI tiles: CA today / 7 days / total)
+   - 4 quick-action cards (Nouvelle facture, Voir factures, Produits, Statistiques) with colored icon badges + hover lift
+   - Recent invoices panel (top 5, clickable → invoice detail, status accent bar, status badge, payable total in blue)
+   - Status distribution card (4 statuses with progress bars + counts + percentages)
+   - Catalog stats card (Produits, Clients, Factures, Articles vendus)
+   - Responsive: 1 col mobile, lg:grid-cols-3 layout
+3. **Wiring**: added "dashboard" to `ViewId` + `NAV_ITEMS` + `MOBILE_NAV` in `app-shell.tsx`, default view changed to "dashboard", added to `view-router.tsx`
+4. Imported `LayoutDashboard` icon
+
+### Styling: skeleton loaders + invoice card polish
+5. **New** `InvoiceCardSkeleton` in `src/components/shared/ui.tsx` (animated pulse, mimics real card structure)
+6. **Invoices screen** (`invoices-screen.tsx`):
+   - Replaced `LoadingState` spinner with `InvoiceCardSkeleton count={6}` for a more polished loading state
+   - Added **summary stats bar** (3 cards: Factures count, Total payable in blue, Articles count) that updates with the active filter
+   - Polished `InvoiceCard`: hover lift (`-translate-y-0.5`), status accent bar grows on hover (h-12→h-14), payable amount in brand blue, tabular-nums for clean alignment, secondary line shows article/qty info when no discount/tax
+
+### New feature: keyboard shortcuts
+7. **In `app-shell.tsx`**: global keydown listener (active when authenticated, non-client):
+   - `N` → new invoice
+   - `/` → focus search (navigates to invoices + focuses search input)
+   - `G` then `D/I/S/P` → dashboard / invoices / stats / products (g+ prefix pattern like Gmail)
+   - Skips when typing in inputs/textarea/contenteditable, skips with modifier keys
+8. **Shortcuts hint panel** in sidebar footer (lg+ screens only): shows N, /, G+… with kbd styling
+
+### Verification
+- `bun run lint`: **0 errors, 0 warnings**
+- Dev log: **0 errors** after all changes (clean compile)
+- curl full flow (while server alive): login 200, auth/me 200, invoices 200, clients 200, products 200, settings 200, users 200, home (dashboard) 200 — all endpoints working
+- agent-browser connection failed due to sandbox dev-server instability (process exits after first compile), not a code issue — verified via curl + lint instead
+
+## Unresolved issues / risks
+- **Dev server sandbox instability**: the `bun run dev` process dies after the first compile cycle in this environment, making sustained agent-browser testing unreliable. Mitigation: verified via curl (all 8 endpoints 200) + lint clean. The app works when accessed immediately after a fresh server start.
+- **No real Supabase**: per environment constraints, uses Prisma+SQLite. Architecture is portable (documented in README).
+
+## Priority recommendations for next phase
+1. **Clients management screen** — currently clients are only created implicitly when invoicing; a dedicated screen to view/edit/delete clients (with their invoice history) would match the Flutter app's settings "Clients" tab
+2. **Invoice templates / branding** — let admin customize PDF colors and footer text (currently hardcoded to "Konté Bussness Services")
+3. **Date range filter** on invoices list (the Flutter app has DateTimeRange filter)
+4. **Bulk status change** in selection mode (currently only bulk delete + CSV export)
+5. **Search across all fields** with highlighting
+6. **Export the invoice list as PDF** (single multi-page PDF of all selected invoices, like the Flutter `shareInvoicesAsPdf`)

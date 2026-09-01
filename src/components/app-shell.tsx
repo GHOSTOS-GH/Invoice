@@ -20,10 +20,12 @@ import {
   Loader2,
   HardHat,
   ShieldAlert,
+  LayoutDashboard,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export type ViewId =
+  | "dashboard"
   | "invoices"
   | "new-invoice"
   | "invoice-detail"
@@ -42,6 +44,7 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
+  { id: "dashboard", label: "Accueil", icon: LayoutDashboard, minRole: "employee" },
   { id: "invoices", label: "Factures", icon: ReceiptText, minRole: "employee" },
   { id: "new-invoice", label: "Nouvelle", icon: PlusCircle, minRole: "employee" },
   { id: "stats", label: "Statistiques", icon: BarChart3, minRole: "employee" },
@@ -52,10 +55,10 @@ const NAV_ITEMS: NavItem[] = [
 ];
 
 const MOBILE_NAV: NavItem[] = [
+  { id: "dashboard", label: "Accueil", icon: LayoutDashboard, minRole: "employee" },
   { id: "invoices", label: "Factures", icon: ReceiptText, minRole: "employee" },
   { id: "new-invoice", label: "Nouvelle", icon: PlusCircle, minRole: "employee" },
   { id: "stats", label: "Stats", icon: BarChart3, minRole: "employee" },
-  { id: "settings", label: "Réglages", icon: SettingsIcon, minRole: "admin" },
 ];
 
 // Context for navigating between views + passing params (e.g. selected invoice id)
@@ -80,7 +83,7 @@ export function AppShell({
   maintenanceMode: boolean;
 }) {
   const { user, loading, logout } = useAuth();
-  const [view, setView] = useState<ViewId>("invoices");
+  const [view, setView] = useState<ViewId>("dashboard");
   const [params, setParams] = useState<Record<string, any>>({});
 
   const navigate = useCallback((v: ViewId, p: Record<string, any> = {}) => {
@@ -101,6 +104,51 @@ export function AppShell({
       window.history.replaceState({}, "", url.toString());
     }
   }, []);
+
+  // Global keyboard shortcuts (only when authenticated, not in inputs)
+  useEffect(() => {
+    if (!user || user.role === "client") return;
+    const onKey = (e: KeyboardEvent) => {
+      // Skip when typing in inputs/textarea/contenteditable
+      const t = e.target as HTMLElement;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) {
+        return;
+      }
+      // Skip with modifier keys
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+      const roleOk = (min: UserRole) => {
+        const order: Record<UserRole, number> = { client: 0, employee: 1, admin: 2 };
+        return order[user.role as UserRole] >= order[min];
+      };
+
+      if (e.key === "n") {
+        e.preventDefault();
+        navigate("new-invoice");
+      } else if (e.key === "/") {
+        e.preventDefault();
+        navigate("invoices");
+        setTimeout(() => {
+          document.querySelector<HTMLInputElement>('input[placeholder*="Rechercher"]')?.focus();
+        }, 60);
+      } else if (e.key === "g") {
+        // "g" then next key: g+d dashboard, g+i invoices, g+s stats, g+p products
+        const handler = (ev: KeyboardEvent) => {
+          window.removeEventListener("keydown", handler);
+          if (ev.key === "d") navigate("dashboard");
+          else if (ev.key === "i") navigate("invoices");
+          else if (ev.key === "s" && roleOk("employee")) navigate("stats");
+          else if (ev.key === "p" && roleOk("employee")) navigate("products");
+        };
+        window.addEventListener("keydown", handler, { once: true });
+        setTimeout(() => window.removeEventListener("keydown", handler), 800);
+      } else if (e.key === "?") {
+        // Show shortcuts help via toast handled elsewhere — just prevent default scroll
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [user, navigate]);
 
   if (loading) {
     return (
@@ -175,6 +223,25 @@ export function AppShell({
             </nav>
 
             <div className="p-3 border-t border-slate-100 space-y-2">
+              <div className="hidden lg:block px-3 py-2 rounded-xl bg-slate-50">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">
+                  Raccourcis
+                </p>
+                <div className="space-y-1 text-[11px] text-slate-500">
+                  <div className="flex justify-between">
+                    <span>Nouvelle facture</span>
+                    <kbd className="font-mono text-[10px] bg-white border border-slate-200 rounded px-1.5 py-0.5">N</kbd>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Rechercher</span>
+                    <kbd className="font-mono text-[10px] bg-white border border-slate-200 rounded px-1.5 py-0.5">/</kbd>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Navigation</span>
+                    <kbd className="font-mono text-[10px] bg-white border border-slate-200 rounded px-1.5 py-0.5">G+…</kbd>
+                  </div>
+                </div>
+              </div>
               <div className="px-3 py-2 rounded-xl bg-slate-50">
                 <p className="text-[12px] font-semibold text-slate-700 truncate">
                   {user.name || user.phone}

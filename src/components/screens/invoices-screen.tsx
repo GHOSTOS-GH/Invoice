@@ -9,7 +9,7 @@ import {
   ScreenHeader,
   StatusBadge,
   EmptyState,
-  LoadingState,
+  InvoiceCardSkeleton,
 } from "@/components/shared/ui";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -127,6 +127,14 @@ export function InvoicesScreen() {
     });
     return list;
   }, [invoices, search, filters, sort]);
+
+  // Summary stats for the current filter
+  const summary = useMemo(() => {
+    const count = filtered.length;
+    const totalPayable = filtered.reduce((s, inv) => s + invoicePayableTotal(inv), 0);
+    const totalQty = filtered.reduce((s, inv) => s + invoiceTotalQuantity(inv.items), 0);
+    return { count, totalPayable, totalQty };
+  }, [filtered]);
 
   const toggleSelect = (id: string) => {
     setSelected((prev) => {
@@ -349,9 +357,39 @@ export function InvoicesScreen() {
           </div>
         )}
 
+        {/* Summary stats for the active filter */}
+        {!loading && filtered.length > 0 && (
+          <div className="grid grid-cols-3 gap-3">
+            <div className="bg-white rounded-xl border border-slate-200 p-3 sm:p-4">
+              <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide mb-1">
+                Factures
+              </p>
+              <p className="text-lg sm:text-xl font-extrabold text-slate-900 tabular-nums leading-none">
+                {summary.count}
+              </p>
+            </div>
+            <div className="bg-white rounded-xl border border-slate-200 p-3 sm:p-4">
+              <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide mb-1">
+                Total
+              </p>
+              <p className="text-lg sm:text-xl font-extrabold text-[#2563EB] tabular-nums leading-none">
+                {formatCurrency(summary.totalPayable)}
+              </p>
+            </div>
+            <div className="bg-white rounded-xl border border-slate-200 p-3 sm:p-4">
+              <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide mb-1">
+                Articles
+              </p>
+              <p className="text-lg sm:text-xl font-extrabold text-slate-900 tabular-nums leading-none">
+                {summary.totalQty}
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* Invoices list */}
         {loading ? (
-          <LoadingState />
+          <InvoiceCardSkeleton count={6} />
         ) : filtered.length === 0 ? (
           <EmptyState
             icon={ReceiptText}
@@ -426,12 +464,15 @@ function InvoiceCard({
   onOpen: () => void;
 }) {
   const total = invoiceTotal(invoice.items);
+  const payable = invoicePayableTotal(invoice);
   const qty = invoiceTotalQuantity(invoice.items);
   return (
     <div
-      className={`bg-white rounded-2xl border transition-all ${
-        selected ? "border-[#2563EB] ring-2 ring-[#2563EB]/20" : "border-slate-200"
-      } hover:shadow-md hover:border-slate-300`}
+      className={`group bg-white rounded-2xl border transition-all duration-200 ${
+        selected
+          ? "border-[#2563EB] ring-2 ring-[#2563EB]/20"
+          : "border-slate-200 hover:border-slate-300 hover:shadow-md hover:-translate-y-0.5"
+      }`}
     >
       <div className="flex items-stretch">
         {selectionMode && (
@@ -445,7 +486,7 @@ function InvoiceCard({
         >
           {/* Left: status accent bar */}
           <div
-            className="w-1 h-12 rounded-full shrink-0"
+            className="w-1 h-12 rounded-full shrink-0 transition-all group-hover:h-14"
             style={{ backgroundColor: INVOICE_STATUS_META[invoice.status].color }}
           />
           {/* Middle: info */}
@@ -468,12 +509,16 @@ function InvoiceCard({
           </div>
           {/* Right: total */}
           <div className="text-right shrink-0">
-            <p className="font-extrabold text-slate-900 text-[16px] leading-tight">
-              {formatCurrency(invoicePayableTotal(invoice))}
+            <p className="font-extrabold text-[#2563EB] text-[16px] leading-tight tabular-nums">
+              {formatCurrency(payable)}
             </p>
-            {(invoice.discount > 0 || invoice.taxRate > 0) && (
-              <p className="text-[11px] text-slate-400">
+            {(invoice.discount > 0 || invoice.taxRate > 0) ? (
+              <p className="text-[11px] text-slate-400 tabular-nums">
                 {formatCurrency(total)}
+              </p>
+            ) : (
+              <p className="text-[10px] text-slate-300">
+                {invoice.items.length} art. · {qty}u
               </p>
             )}
           </div>

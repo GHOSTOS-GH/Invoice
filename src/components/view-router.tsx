@@ -2,6 +2,7 @@
 // Routes between screens based on the current NavContext view.
 
 import { useNav } from "@/components/app-shell";
+import { DashboardScreen } from "@/components/screens/dashboard-screen";
 import { InvoicesScreen } from "@/components/screens/invoices-screen";
 import { NewInvoiceScreen } from "@/components/screens/new-invoice-screen";
 import { InvoiceDetailScreen } from "@/components/screens/invoice-detail-screen";
@@ -15,6 +16,8 @@ export function ViewRouter() {
   const { view, params } = useNav();
 
   switch (view) {
+    case "dashboard":
+      return <DashboardScreen />;
     case "invoices":
       return <InvoicesScreen />;
     case "new-invoice":
@@ -32,6 +35,6 @@ export function ViewRouter() {
     case "users":
       return <UsersScreen />;
     default:
-      return <InvoicesScreen />;
+      return <DashboardScreen />;
   }
 }
