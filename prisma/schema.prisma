@@ -1,0 +1,99 @@
+// Prisma schema for Invoice PWA
+// Reproduces the data models from the Flutter invoice_app
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  phone        String   @unique // format +221XXXXXXXXX
+  passwordHash String
+  role         String   @default("client") // client | employee | admin
+  name         String?
+  disabled     Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  invoices  Invoice[]
+  clients   Client[]
+  products  Product[]
+}
+
+model Invoice {
+  id         String   @id @default(cuid())
+  clientName String
+  clientId   String?  // optional real relation to Client
+  client     Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  status     String   @default("enCours") // enCours | enLivraison | livree | archivee
+  notes      String?
+  discount   Float    @default(0) // remise en FCFA
+  taxRate    Float    @default(0) // taux TVA en %
+  createdBy  String
+  creator    User     @relation(fields: [createdBy], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  items InvoiceItem[]
+
+  @@index([clientName])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model InvoiceItem {
+  id         String  @id @default(cuid())
+  invoiceId  String
+  invoice    Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  name       String
+  quantity   Int
+  unitPrice  Float
+
+  @@index([invoiceId])
+}
+
+model Client {
+  id        String   @id @default(cuid())
+  name      String
+  phone     String?
+  address   String?
+  createdBy String
+  creator   User     @relation(fields: [createdBy], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  invoices Invoice[]
+
+  @@index([name])
+}
+
+model Product {
+  id        String   @id @default(cuid())
+  name      String
+  category  String
+  imageUrl  String?
+  createdBy String
+  creator   User     @relation(fields: [createdBy], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([category])
+  @@index([name])
+}
+
+model Settings {
+  id              String  @id @default("singleton")
+  maintenanceMode Boolean @default(false)
+  shopName        String  @default("")
+  shopAddress     String  @default("")
+  shopPhone       String  @default("")
+  shopNinea       String  @default("")
+  footerMessage   String  @default("Merci de votre visite !")
+  logoUrl         String?
+  updatedAt       DateTime @updatedAt
+}

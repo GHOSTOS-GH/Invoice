@@ -1,0 +1,903 @@
+     1→// lib/screens/history_screen.dart
+     2→// Écran d'historique avec filtres, tri, statistiques, pagination, export groupé
+     3→
+     4→import 'package:flutter/material.dart';
+     5→import 'package:intl/intl.dart';
+     6→import '../models/invoice.dart';
+     7→import '../services/backup_service.dart';
+     8→import '../services/storage_service.dart';
+     9→import '../services/pdf_service.dart';
+    10→import '../utils/formatters.dart';
+    11→import '../utils/constants.dart';
+    12→import '../widgets/skeleton_loader.dart';
+    13→import 'invoice_detail_screen.dart';
+    14→
+    15→enum SortOption {
+    16→  dateDesc,
+    17→  dateAsc,
+    18→  totalDesc,
+    19→  totalAsc,
+    20→  clientAsc,
+    21→  statusAsc,
+    22→}
+    23→
+    24→class HistoryScreen extends StatefulWidget {
+    25→  final VoidCallback onInvoiceUpdated;
+    26→  const HistoryScreen({super.key, required this.onInvoiceUpdated});
+    27→
+    28→  @override
+    29→  State<HistoryScreen> createState() => HistoryScreenState();
+    30→}
+    31→
+    32→class HistoryScreenState extends State<HistoryScreen> with AutomaticKeepAliveClientMixin {
+    33→  final _storageService = StorageService();
+    34→  final _pdfService = PdfService();
+    35→  List<Invoice> _invoices = [];
+    36→  List<Invoice> _filteredInvoices = [];
+    37→  bool _isLoading = true;
+    38→  bool _loadingError = false;
+    39→  final TextEditingController _searchController = TextEditingController();
+    40→  String _searchQuery = '';
+    41→  bool _isSelectionMode = false;
+    42→  Set<String> _selectedIds = {};
+    43→
+    44→  // Filtres d'état
+    45→  bool _filterEnCours = false;
+    46→  bool _filterEnLivraison = false;
+    47→  bool _filterLivree = false;
+    48→  bool _filterArchivee = false;
+    49→
+    50→  // Filtre par période de dates (ex: factures du 10/02 au 11/02)
+    51→  DateTimeRange? _filterDateRange;
+    52→
+    53→  // Option de tri
+    54→  SortOption _currentSort = SortOption.dateDesc;
+    55→
+    56→  // Pagination
+    57→  final ScrollController _scrollController = ScrollController();
+    58→  int _displayedCount = 50;
+    59→
+    60→  @override
+    61→  bool get wantKeepAlive => true;
+    62→
+    63→  @override
+    64→  void initState() {
+    65→    super.initState();
+    66→    _loadInvoices();
+    67→    _searchController.addListener(_onSearchChanged);
+    68→    _scrollController.addListener(_onScroll);
+    69→  }
+    70→
+    71→  @override
+    72→  void dispose() {
+    73→    _searchController.removeListener(_onSearchChanged);
+    74→    _searchController.dispose();
+    75→    _scrollController.dispose();
+    76→    super.dispose();
+    77→  }
+    78→
+    79→  void _onScroll() {
+    80→    if (_scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 200) {
+    81→      if (_displayedCount < _filteredInvoices.length) {
+    82→        setState(() {
+    83→          _displayedCount = (_displayedCount + 50).clamp(0, _filteredInvoices.length);
+    84→        });
+    85→      }
+    86→    }
+    87→  }
+    88→
+    89→  void _onSearchChanged() {
+    90→    setState(() {
+    91→      _searchQuery = _searchController.text.toLowerCase();
+    92→      _filterInvoices();
+    93→      _displayedCount = 50;
+    94→    });
+    95→  }
+    96→
+    97→  void _filterInvoices() {
+    98→    _filteredInvoices = List.from(_invoices);
+    99→
+   100→    // Filtres de statut
+   101→    final hasActiveStatusFilter = _filterEnCours || _filterEnLivraison || _filterLivree || _filterArchivee;
+   102→    if (hasActiveStatusFilter) {
+   103→      _filteredInvoices = _filteredInvoices.where((invoice) {
+   104→        if (_filterEnCours && invoice.status == InvoiceStatus.enCours) return true;
+   105→        if (_filterEnLivraison && invoice.status == InvoiceStatus.enLivraison) return true;
+   106→        if (_filterLivree && invoice.status == InvoiceStatus.livree) return true;
+   107→        if (_filterArchivee && invoice.status == InvoiceStatus.archivee) return true;
+   108→        return false;
+   109→      }).toList();
+   110→    }
+   111→
+   112→    // Filtre par période de dates
+   113→    if (_filterDateRange != null) {
+   114→      final start = DateTime(
+   115→        _filterDateRange!.start.year,
+   116→        _filterDateRange!.start.month,
+   117→        _filterDateRange!.start.day,
+   118→      );
+   119→      final end = DateTime(
+   120→        _filterDateRange!.end.year,
+   121→        _filterDateRange!.end.month,
+   122→        _filterDateRange!.end.day,
+   123→        23, 59, 59,
+   124→      );
+   125→      _filteredInvoices = _filteredInvoices.where((invoice) {
+   126→        final d = invoice.createdAt;
+   127→        return !d.isBefore(start) && !d.isAfter(end);
+   128→      }).toList();
+   129→    }
+   130→
+   131→    // Recherche étendue (client, articles, notes, numéro)
+   132→    if (_searchQuery.isNotEmpty) {
+   133→      _filteredInvoices = _filteredInvoices.where((invoice) {
+   134→        if (invoice.clientName.toLowerCase().contains(_searchQuery)) return true;
+   135→        if (invoice.id.toLowerCase().contains(_searchQuery)) return true;
+   136→        if (invoice.notes != null && invoice.notes!.toLowerCase().contains(_searchQuery)) return true;
+   137→        for (var item in invoice.items) {
+   138→          if (item.name.toLowerCase().contains(_searchQuery)) return true;
+   139→        }
+   140→        return false;
+   141→      }).toList();
+   142→    }
+   143→
+   144→    _sortInvoices();
+   145→    setState(() {});
+   146→  }
+   147→
+   148→  void _sortInvoices() {
+   149→    switch (_currentSort) {
+   150→      case SortOption.dateDesc:
+   151→        _filteredInvoices.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+   152→        break;
+   153→      case SortOption.dateAsc:
+   154→        _filteredInvoices.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+   155→        break;
+   156→      case SortOption.totalDesc:
+   157→        _filteredInvoices.sort((a, b) => b.total.compareTo(a.total));
+   158→        break;
+   159→      case SortOption.totalAsc:
+   160→        _filteredInvoices.sort((a, b) => a.total.compareTo(b.total));
+   161→        break;
+   162→      case SortOption.clientAsc:
+   163→        _filteredInvoices.sort((a, b) => a.clientName.compareTo(b.clientName));
+   164→        break;
+   165→      case SortOption.statusAsc:
+   166→        _filteredInvoices.sort((a, b) => a.status.index.compareTo(b.status.index));
+   167→        break;
+   168→    }
+   169→  }
+   170→
+   171→  Future<void> _loadInvoices() async {
+   172→    setState(() {
+   173→      _isLoading = true;
+   174→      _loadingError = false;
+   175→    });
+   176→    try {
+   177→      final invoices = await _storageService.loadInvoices();
+   178→      if (!mounted) return;
+   179→      setState(() {
+   180→        _invoices = invoices;
+   181→        _filterInvoices();
+   182→        _isLoading = false;
+   183→      });
+   184→    } catch (e) {
+   185→      if (!mounted) return;
+   186→      setState(() {
+   187→        _isLoading = false;
+   188→        _loadingError = true;
+   189→      });
+   190→    }
+   191→  }
+   192→
+   193→  void refreshData() {
+   194→    _loadInvoices();
+   195→  }
+   196→
+   197→  String _formatDate(DateTime date) => DateFormat('dd/MM/yyyy à HH:mm', 'fr_FR').format(date);
+   198→
+   199→  void _openInvoiceDetail(Invoice invoice) {
+   200→    Navigator.of(context).push(
+   201→      PageRouteBuilder(
+   202→        transitionDuration: const Duration(milliseconds: 300),
+   203→        pageBuilder: (context, animation, secondaryAnimation) => InvoiceDetailScreen(
+   204→          invoice: invoice,
+   205→          onInvoiceUpdated: widget.onInvoiceUpdated,
+   206→        ),
+   207→        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+   208→          return SlideTransition(
+   209→            position: Tween<Offset>(
+   210→              begin: const Offset(1.0, 0.0),
+   211→              end: Offset.zero,
+   212→            ).animate(CurvedAnimation(parent: animation, curve: Curves.easeInOut)),
+   213→            child: child,
+   214→          );
+   215→        },
+   216→      ),
+   217→    );
+   218→  }
+   219→
+   220→  void _toggleSelection(String id) {
+   221→    setState(() {
+   222→      if (_selectedIds.contains(id)) {
+   223→        _selectedIds.remove(id);
+   224→      } else {
+   225→        _selectedIds.add(id);
+   226→      }
+   227→      if (_selectedIds.isEmpty) _isSelectionMode = false;
+   228→    });
+   229→  }
+   230→
+   231→  void _selectAll() {
+   232→    setState(() {
+   233→      if (_selectedIds.length == _filteredInvoices.length) {
+   234→        _selectedIds.clear();
+   235→      } else {
+   236→        _selectedIds = _filteredInvoices.map((inv) => inv.id).toSet();
+   237→      }
+   238→      if (_selectedIds.isEmpty) _isSelectionMode = false;
+   239→    });
+   240→  }
+   241→
+   242→  Future<void> _deleteSelected() async {
+   243→    if (_selectedIds.isEmpty) return;
+   244→    final confirm = await showDialog<bool>(
+   245→      context: context,
+   246→      builder: (context) => AlertDialog(
+   247→        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Constants.cardRadius)),
+   248→        title: const Text('Confirmer la suppression'),
+   249→        content: Text('Voulez-vous vraiment supprimer ${_selectedIds.length} facture(s) ?'),
+   250→        actions: [
+   251→          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Annuler')),
+   252→          TextButton(
+   253→            onPressed: () => Navigator.pop(context, true),
+   254→            child: const Text('Supprimer', style: TextStyle(color: Colors.red)),
+   255→          ),
+   256→        ],
+   257→      ),
+   258→    );
+   259→    if (confirm != true) return;
+   260→
+   261→    final deletedCount = _selectedIds.length;
+   262→    _invoices.removeWhere((inv) => _selectedIds.contains(inv.id));
+   263→    await _storageService.saveInvoices(_invoices);
+   264→    setState(() {
+   265→      _filterInvoices();
+   266→      _isSelectionMode = false;
+   267→      _selectedIds.clear();
+   268→      _displayedCount = 50;
+   269→    });
+   270→    if (!mounted) return;
+   271→    ScaffoldMessenger.of(context).showSnackBar(
+   272→      SnackBar(content: Text('$deletedCount facture(s) supprimée(s)'), backgroundColor: Colors.green,
+   273→      behavior: SnackBarBehavior.floating),
+   274→    );
+   275→  }
+   276→
+   277→  /// Exporte en CSV la sélection actuellement filtrée (période, statut, recherche...).
+   278→  Future<void> _exportFilteredCsv() async {
+   279→    if (_filteredInvoices.isEmpty) return;
+   280→    final backupService = BackupService();
+   281→    final csv = backupService.invoicesToCsv(_filteredInvoices);
+   282→    final filename =
+   283→        'factures_${DateFormat('yyyyMMdd_HHmm').format(DateTime.now())}.csv';
+   284→
+   285→    ScaffoldMessenger.of(context).showSnackBar(
+   286→      SnackBar(
+   287→        content: Text('Export CSV de ${_filteredInvoices.length} facture(s)...'),
+   288→        backgroundColor: const Color(0xFF2563EB),
+   289→        behavior: SnackBarBehavior.floating,
+   290→        duration: const Duration(seconds: 2),
+   291→      ),
+   292→    );
+   293→    try {
+   294→      await backupService.shareCsv(csv, filename);
+   295→    } catch (e) {
+   296→      if (!mounted) return;
+   297→      ScaffoldMessenger.of(context).showSnackBar(
+   298→        SnackBar(
+   299→          content: Text('Erreur d\'export : $e'),
+   300→          backgroundColor: Colors.red,
+   301→          behavior: SnackBarBehavior.floating,
+   302→        ),
+   303→      );
+   304→    }
+   305→  }
+   306→
+   307→  Future<void> _exportSelected() async {
+   308→    if (_selectedIds.isEmpty) return;
+   309→    final selectedInvoices = _invoices.where((inv) => _selectedIds.contains(inv.id)).toList();
+   310→
+   311→    ScaffoldMessenger.of(context).showSnackBar(
+   312→      SnackBar(
+   313→        content: Text('Export de ${selectedInvoices.length} facture(s)...'),
+   314→        backgroundColor: const Color(0xFF2563EB),
+   315→        behavior: SnackBarBehavior.floating,
+   316→        duration: const Duration(seconds: 2),
+   317→      ),
+   318→    );
+   319→
+   320→    // Un seul partage groupé (liste de XFile) au lieu d'ouvrir le
+   321→    // partage natif une fois par facture.
+   322→    try {
+   323→      await _pdfService.shareInvoicesAsPdf(selectedInvoices);
+   324→    } catch (e) {
+   325→      if (!mounted) return;
+   326→      ScaffoldMessenger.of(context).showSnackBar(
+   327→        SnackBar(
+   328→          content: Text('Erreur d\'export : $e'),
+   329→          backgroundColor: Colors.red,
+   330→          behavior: SnackBarBehavior.floating,
+   331→        ),
+   332→      );
+   333→    }
+   334→  }
+   335→
+   336→  void _exitSelectionMode() {
+   337→    setState(() {
+   338→      _isSelectionMode = false;
+   339→      _selectedIds.clear();
+   340→    });
+   341→  }
+   342→
+   343→  void _clearStatusFilters() {
+   344→    setState(() {
+   345→      _filterEnCours = false;
+   346→      _filterEnLivraison = false;
+   347→      _filterLivree = false;
+   348→      _filterArchivee = false;
+   349→      _filterInvoices();
+   350→    });
+   351→  }
+   352→
+   353→  Future<void> _pickDateRange() async {
+   354→    final now = DateTime.now();
+   355→    final picked = await showDateRangePicker(
+   356→      context: context,
+   357→      firstDate: DateTime(now.year - 10),
+   358→      lastDate: now,
+   359→      initialDateRange: _filterDateRange,
+   360→      helpText: 'Sélectionner une période',
+   361→      saveText: 'Appliquer',
+   362→      cancelText: 'Annuler',
+   363→    );
+   364→    if (picked == null || !mounted) return;
+   365→    setState(() {
+   366→      _filterDateRange = picked;
+   367→      _filterInvoices();
+   368→      _displayedCount = 50;
+   369→    });
+   370→  }
+   371→
+   372→  void _clearDateFilter() {
+   373→    setState(() {
+   374→      _filterDateRange = null;
+   375→      _filterInvoices();
+   376→      _displayedCount = 50;
+   377→    });
+   378→  }
+   379→
+   380→  int get _totalInvoices => _filteredInvoices.length;
+   381→  double get _totalAmount => _filteredInvoices.fold(0.0, (sum, inv) => sum + inv.total);
+   382→  Map<InvoiceStatus, int> get _statusCount {
+   383→    return {
+   384→      InvoiceStatus.enCours: _filteredInvoices.where((inv) => inv.status == InvoiceStatus.enCours).length,
+   385→      InvoiceStatus.enLivraison: _filteredInvoices.where((inv) => inv.status == InvoiceStatus.enLivraison).length,
+   386→      InvoiceStatus.livree: _filteredInvoices.where((inv) => inv.status == InvoiceStatus.livree).length,
+   387→      InvoiceStatus.archivee: _filteredInvoices.where((inv) => inv.status == InvoiceStatus.archivee).length,
+   388→    };
+   389→  }
+   390→
+   391→  @override
+   392→  Widget build(BuildContext context) {
+   393→    super.build(context);
+   394→    return Scaffold(
+   395→      backgroundColor: const Color(0xFFF8FAFC),
+   396→      appBar: AppBar(
+   397→        title: _isSelectionMode ? Text('${_selectedIds.length} sélectionnée(s)') : const Text('Historique'),
+   398→        elevation: 0,
+   399→        backgroundColor: Colors.white,
+   400→        foregroundColor: const Color(0xFF1E293B),
+   401→        shape: const Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
+   402→        leading: _isSelectionMode
+   403→            ? IconButton(icon: const Icon(Icons.close), onPressed: _exitSelectionMode)
+   404→            : null,
+   405→        actions: _isSelectionMode
+   406→            ? [
+   407→                IconButton(icon: const Icon(Icons.select_all), onPressed: _selectAll),
+   408→                IconButton(
+   409→                  icon: const Icon(Icons.share),
+   410→                  onPressed: _selectedIds.isEmpty ? null : _exportSelected,
+   411→                  tooltip: 'Exporter la sélection',
+   412→                ),
+   413→                IconButton(
+   414→                  icon: const Icon(Icons.delete),
+   415→                  onPressed: _selectedIds.isEmpty ? null : _deleteSelected,
+   416→                  color: Colors.red,
+   417→                ),
+   418→              ]
+   419→            : [
+   420→                PopupMenuButton<SortOption>(
+   421→                  icon: const Icon(Icons.sort),
+   422→                  tooltip: 'Trier par',
+   423→                  onSelected: (SortOption option) {
+   424→                    setState(() {
+   425→                      _currentSort = option;
+   426→                      _sortInvoices();
+   427→                      _displayedCount = 50;
+   428→                    });
+   429→                  },
+   430→                  itemBuilder: (BuildContext context) => [
+   431→                    const PopupMenuItem(value: SortOption.dateDesc, child: Text('Date (récente → ancienne)')),
+   432→                    const PopupMenuItem(value: SortOption.dateAsc, child: Text('Date (ancienne → récente)')),
+   433→                    const PopupMenuItem(value: SortOption.totalDesc, child: Text('Montant (décroissant)')),
+   434→                    const PopupMenuItem(value: SortOption.totalAsc, child: Text('Montant (croissant)')),
+   435→                    const PopupMenuItem(value: SortOption.clientAsc, child: Text('Client (A → Z)')),
+   436→                    const PopupMenuItem(value: SortOption.statusAsc, child: Text('Par statut')),
+   437→                  ],
+   438→                ),
+   439→                IconButton(icon: const Icon(Icons.checklist), onPressed: () => setState(() => _isSelectionMode = true)),
+   440→                IconButton(icon: const Icon(Icons.refresh), onPressed: _loadInvoices),
+   441→              ],
+   442→        bottom: _isSelectionMode
+   443→            ? null
+   444→            : PreferredSize(
+   445→                preferredSize: const Size.fromHeight(60),
+   446→                child: Padding(
+   447→                  padding: const EdgeInsets.all(8.0),
+   448→                  child: TextField(
+   449→                    controller: _searchController,
+   450→                    decoration: InputDecoration(
+   451→                      hintText: 'Rechercher par client, article, notes, n°...',
+   452→                      prefixIcon: const Icon(Icons.search),
+   453→                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
+   454→                      filled: true,
+   455→                      fillColor: Colors.grey[100],
+   456→                      contentPadding: const EdgeInsets.symmetric(vertical: 0),
+   457→                    ),
+   458→                  ),
+   459→                ),
+   460→              ),
+   461→      ),
+   462→      body: _isLoading
+   463→          ? const SkeletonList(itemCount: 5)
+   464→          : _loadingError
+   465→              ? Center(
+   466→                  child: Column(
+   467→                    mainAxisAlignment: MainAxisAlignment.center,
+   468→                    children: [
+   469→                      const Icon(Icons.error_outline, size: 64, color: Colors.red),
+   470→                      const SizedBox(height: 16),
+   471→                      const Text('Erreur de chargement', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w500)),
+   472→                      const SizedBox(height: 24),
+   473→                      ElevatedButton.icon(
+   474→                        onPressed: _loadInvoices,
+   475→                        icon: const Icon(Icons.refresh),
+   476→                        label: const Text('Réessayer'),
+   477→                      ),
+   478→                    ],
+   479→                  ),
+   480→                )
+   481→              : Column(
+   482→                  children: [
+   483→                    if (!_isSelectionMode) ...[
+   484→                      Container(
+   485→                        color: Colors.white,
+   486→                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+   487→                        child: Column(
+   488→                          crossAxisAlignment: CrossAxisAlignment.start,
+   489→                          children: [
+   490→                            Row(
+   491→                              children: [
+   492→                                Expanded(
+   493→                                  child: Text('$_totalInvoices facture(s)', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+   494→                                ),
+   495→                                const SizedBox(width: 8),
+   496→                                Flexible(
+   497→                                  child: Text(
+   498→                                    _filterDateRange != null
+   499→                                        ? 'Total (${DateFormat('dd/MM').format(_filterDateRange!.start)} → ${DateFormat('dd/MM').format(_filterDateRange!.end)}) : ${formatCurrency(_totalAmount)}'
+   500→                                        : 'Total : ${formatCurrency(_totalAmount)}',
+   501→                                    maxLines: 1,
+   502→                                    overflow: TextOverflow.ellipsis,
+   503→                                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Color(0xFF2563EB)),
+   504→                                  ),
+   505→                                ),
+   506→                                IconButton(
+   507→                                  icon: const Icon(Icons.ios_share),
+   508→                                  tooltip: 'Exporter la sélection filtrée (CSV)',
+   509→                                  visualDensity: VisualDensity.compact,
+   510→                                  onPressed: _filteredInvoices.isEmpty ? null : _exportFilteredCsv,
+   511→                                ),
+   512→                              ],
+   513→                            ),
+   514→                            const SizedBox(height: 8),
+   515→                            SingleChildScrollView(
+   516→                              scrollDirection: Axis.horizontal,
+   517→                              child: Row(
+   518→                                children: [
+   519→                                  _buildStatusChip('En cours', _statusCount[InvoiceStatus.enCours]!, InvoiceStatus.enCours.color),
+   520→                                  const SizedBox(width: 8),
+   521→                                  _buildStatusChip('En livraison', _statusCount[InvoiceStatus.enLivraison]!, InvoiceStatus.enLivraison.color),
+   522→                                  const SizedBox(width: 8),
+   523→                                  _buildStatusChip('Livrée', _statusCount[InvoiceStatus.livree]!, InvoiceStatus.livree.color),
+   524→                                  const SizedBox(width: 8),
+   525→                                  _buildStatusChip('Archivée', _statusCount[InvoiceStatus.archivee]!, InvoiceStatus.archivee.color),
+   526→                                ],
+   527→                              ),
+   528→                            ),
+   529→                            const SizedBox(height: 12),
+   530→                            Row(
+   531→                              children: [
+   532→                                OutlinedButton.icon(
+   533→                                  onPressed: _pickDateRange,
+   534→                                  icon: Icon(
+   535→                                    Icons.date_range,
+   536→                                    size: 18,
+   537→                                    color: _filterDateRange != null ? const Color(0xFF2563EB) : const Color(0xFF64748B),
+   538→                                  ),
+   539→                                  label: Text(
+   540→                                    _filterDateRange == null
+   541→                                        ? 'Période'
+   542→                                        : '${DateFormat('dd/MM/yyyy').format(_filterDateRange!.start)} → ${DateFormat('dd/MM/yyyy').format(_filterDateRange!.end)}',
+   543→                                    style: TextStyle(
+   544→                                      fontSize: 13,
+   545→                                      fontWeight: FontWeight.w600,
+   546→                                      color: _filterDateRange != null ? const Color(0xFF2563EB) : const Color(0xFF64748B),
+   547→                                    ),
+   548→                                  ),
+   549→                                  style: OutlinedButton.styleFrom(
+   550→                                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+   551→                                    visualDensity: VisualDensity.compact,
+   552→                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+   553→                                    side: BorderSide(
+   554→                                      color: _filterDateRange != null ? const Color(0xFF2563EB) : const Color(0xFFE2E8F0),
+   555→                                    ),
+   556→                                  ),
+   557→                                ),
+   558→                                if (_filterDateRange != null) ...[
+   559→                                  const SizedBox(width: 4),
+   560→                                  IconButton(
+   561→                                    icon: const Icon(Icons.close, size: 18),
+   562→                                    onPressed: _clearDateFilter,
+   563→                                    tooltip: 'Effacer la période',
+   564→                                    visualDensity: VisualDensity.compact,
+   565→                                  ),
+   566→                                ],
+   567→                              ],
+   568→                            ),
+   569→                            const SizedBox(height: 12),
+   570→                            Wrap(
+   571→                              spacing: 8,
+   572→                              runSpacing: 8,
+   573→                              children: [
+   574→                                FilterChip(
+   575→                                  label: const Text('En cours'),
+   576→                                  selected: _filterEnCours,
+   577→                                  onSelected: (v) {
+   578→                                    setState(() { _filterEnCours = v; _filterInvoices(); _displayedCount = 50; });
+   579→                                  },
+   580→                                  backgroundColor: const Color(0xFFF1F5F9),
+   581→                                  selectedColor: Color(InvoiceStatus.enCours.color).withOpacity(0.2),
+   582→                                  labelStyle: TextStyle(color: _filterEnCours ? Color(InvoiceStatus.enCours.color) : const Color(0xFF64748B)),
+   583→                                  side: BorderSide(color: _filterEnCours ? Color(InvoiceStatus.enCours.color) : const Color(0xFFE2E8F0)),
+   584→                                ),
+   585→                                FilterChip(
+   586→                                  label: const Text('En livraison'),
+   587→                                  selected: _filterEnLivraison,
+   588→                                  onSelected: (v) {
+   589→                                    setState(() { _filterEnLivraison = v; _filterInvoices(); _displayedCount = 50; });
+   590→                                  },
+   591→                                  backgroundColor: const Color(0xFFF1F5F9),
+   592→                                  selectedColor: Color(InvoiceStatus.enLivraison.color).withOpacity(0.2),
+   593→                                  labelStyle: TextStyle(color: _filterEnLivraison ? Color(InvoiceStatus.enLivraison.color) : const Color(0xFF64748B)),
+   594→                                  side: BorderSide(color: _filterEnLivraison ? Color(InvoiceStatus.enLivraison.color) : const Color(0xFFE2E8F0)),
+   595→                                ),
+   596→                                FilterChip(
+   597→                                  label: const Text('Livrée'),
+   598→                                  selected: _filterLivree,
+   599→                                  onSelected: (v) {
+   600→                                    setState(() { _filterLivree = v; _filterInvoices(); _displayedCount = 50; });
+   601→                                  },
+   602→                                  backgroundColor: const Color(0xFFF1F5F9),
+   603→                                  selectedColor: Color(InvoiceStatus.livree.color).withOpacity(0.2),
+   604→                                  labelStyle: TextStyle(color: _filterLivree ? Color(InvoiceStatus.livree.color) : const Color(0xFF64748B)),
+   605→                                  side: BorderSide(color: _filterLivree ? Color(InvoiceStatus.livree.color) : const Color(0xFFE2E8F0)),
+   606→                                ),
+   607→                                FilterChip(
+   608→                                  label: const Text('Archivée'),
+   609→                                  selected: _filterArchivee,
+   610→                                  onSelected: (v) {
+   611→                                    setState(() { _filterArchivee = v; _filterInvoices(); _displayedCount = 50; });
+   612→                                  },
+   613→                                  backgroundColor: const Color(0xFFF1F5F9),
+   614→                                  selectedColor: Color(InvoiceStatus.archivee.color).withOpacity(0.2),
+   615→                                  labelStyle: TextStyle(color: _filterArchivee ? Color(InvoiceStatus.archivee.color) : const Color(0xFF64748B)),
+   616→                                  side: BorderSide(color: _filterArchivee ? Color(InvoiceStatus.archivee.color) : const Color(0xFFE2E8F0)),
+   617→                                ),
+   618→                                if (_filterEnCours || _filterEnLivraison || _filterLivree || _filterArchivee)
+   619→                                  ActionChip(
+   620→                                    label: const Text('Réinitialiser'),
+   621→                                    onPressed: _clearStatusFilters,
+   622→                                    backgroundColor: Colors.grey[100],
+   623→                                  ),
+   624→                              ],
+   625→                            ),
+   626→                          ],
+   627→                        ),
+   628→                      ),
+   629→                      const Divider(height: 1),
+   630→                    ],
+   631→                    Expanded(
+   632→                      child: _filteredInvoices.isEmpty
+   633→                          ? Center(
+   634→                              child: Column(
+   635→                                mainAxisAlignment: MainAxisAlignment.center,
+   636→                                children: [
+   637→                                  Icon(Icons.receipt_long_outlined, size: 80, color: Colors.grey[300]),
+   638→                                  const SizedBox(height: 16),
+   639→                                  Text(_searchQuery.isEmpty ? 'Aucune facture' : 'Aucun résultat', style: TextStyle(fontSize: 18, color: Colors.grey[600])),
+   640→                                ],
+   641→                              ),
+   642→                            )
+   643→                          : RefreshIndicator(
+   644→                              onRefresh: _loadInvoices,
+   645→                              child: ListView.separated(
+   646→                                controller: _scrollController,
+   647→                                padding: const EdgeInsets.all(16),
+   648→                                itemCount: (_displayedCount < _filteredInvoices.length) ? _displayedCount + 1 : _filteredInvoices.length,
+   649→                                separatorBuilder: (_, __) => const SizedBox(height: 12),
+   650→                                itemBuilder: (context, index) {
+   651→                                  if (index == _displayedCount && _displayedCount < _filteredInvoices.length) {
+   652→                                    return const Padding(
+   653→                                      padding: EdgeInsets.all(16),
+   654→                                      child: Center(child: CircularProgressIndicator()),
+   655→                                    );
+   656→                                  }
+   657→                                  final invoice = _filteredInvoices[index];
+   658→                                  final isSelected = _selectedIds.contains(invoice.id);
+   659→                                  
+   660→                                  if (_isSelectionMode) {
+   661→                                    return _buildInvoiceCard(invoice, isSelected, index);
+   662→                                  }
+   663→                                  
+   664→                                  return _buildSwipeableInvoiceCard(invoice, isSelected, index);
+   665→                                },
+   666→                              ),
+   667→                            ),
+   668→                    ),
+   669→                  ],
+   670→                ),
+   671→    );
+   672→  }
+   673→
+   674→  Widget _buildSwipeableInvoiceCard(Invoice invoice, bool isSelected, int index) {
+   675→    return Dismissible(
+   676→      key: Key('swipe_${invoice.id}'),
+   677→      confirmDismiss: (direction) async {
+   678→        if (direction == DismissDirection.startToEnd) {
+   679→          // Gauche → Droite : statut avance
+   680→          InvoiceStatus newStatus;
+   681→          switch (invoice.status) {
+   682→            case InvoiceStatus.enCours:
+   683→              newStatus = InvoiceStatus.enLivraison;
+   684→              break;
+   685→            case InvoiceStatus.enLivraison:
+   686→              newStatus = InvoiceStatus.livree;
+   687→              break;
+   688→            case InvoiceStatus.livree:
+   689→              newStatus = InvoiceStatus.archivee;
+   690→              break;
+   691→            case InvoiceStatus.archivee:
+   692→              return false; // Ne rien faire si archivée
+   693→          }
+   694→          await _updateInvoiceStatus(invoice, newStatus);
+   695→          return false; // Ne pas supprimer la carte
+   696→        } else {
+   697→          // Droite → Gauche : statut recule
+   698→          InvoiceStatus newStatus;
+   699→          switch (invoice.status) {
+   700→            case InvoiceStatus.livree:
+   701→              newStatus = InvoiceStatus.enLivraison;
+   702→              break;
+   703→            case InvoiceStatus.enLivraison:
+   704→              newStatus = InvoiceStatus.enCours;
+   705→              break;
+   706→            case InvoiceStatus.enCours:
+   707→              return false; // Déjà au minimum
+   708→            case InvoiceStatus.archivee:
+   709→              newStatus = InvoiceStatus.livree;
+   710→              break;
+   711→          }
+   712→          await _updateInvoiceStatus(invoice, newStatus);
+   713→          return false; // Ne pas supprimer la carte
+   714→        }
+   715→      },
+   716→      background: Container(
+   717→        alignment: Alignment.centerLeft,
+   718→        padding: const EdgeInsets.only(left: 20),
+   719→        decoration: BoxDecoration(
+   720→          borderRadius: BorderRadius.circular(Constants.cardRadius),
+   721→          gradient: const LinearGradient(
+   722→            colors: [Color(0xFF16A34A), Color(0xFF15803D)],
+   723→            begin: Alignment.centerLeft,
+   724→            end: Alignment.centerRight,
+   725→          ),
+   726→        ),
+   727→        child: const Row(
+   728→          children: [
+   729→            Icon(Icons.arrow_forward, color: Colors.white, size: 24),
+   730→            SizedBox(width: 8),
+   731→            Icon(Icons.local_shipping, color: Colors.white, size: 20),
+   732→            SizedBox(width: 4),
+   733→            Text('Avancer', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+   734→          ],
+   735→        ),
+   736→      ),
+   737→      secondaryBackground: Container(
+   738→        alignment: Alignment.centerRight,
+   739→        padding: const EdgeInsets.only(right: 20),
+   740→        decoration: BoxDecoration(
+   741→          borderRadius: BorderRadius.circular(Constants.cardRadius),
+   742→          gradient: const LinearGradient(
+   743→            colors: [Color(0xFFF59E0B), Color(0xFFD97706)],
+   744→            begin: Alignment.centerRight,
+   745→            end: Alignment.centerLeft,
+   746→          ),
+   747→        ),
+   748→        child: const Row(
+   749→          mainAxisAlignment: MainAxisAlignment.end,
+   750→          children: [
+   751→            Text('Reculer', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+   752→            SizedBox(width: 4),
+   753→            Icon(Icons.arrow_back, color: Colors.white, size: 24),
+   754→          ],
+   755→        ),
+   756→      ),
+   757→      direction: DismissDirection.horizontal,
+   758→      movementDuration: const Duration(milliseconds: 300),
+   759→      resizeDuration: null,
+   760→      child: _buildInvoiceCard(invoice, isSelected, index),
+   761→    );
+   762→  }
+   763→
+   764→  Future<void> _updateInvoiceStatus(Invoice invoice, InvoiceStatus newStatus) async {
+   765→    final updatedInvoice = invoice.copyWith(status: newStatus);
+   766→    final all = await _storageService.loadInvoices();
+   767→    final idx = all.indexWhere((inv) => inv.id == invoice.id);
+   768→    if (idx != -1) {
+   769→      all[idx] = updatedInvoice;
+   770→      await _storageService.saveInvoices(all);
+   771→    }
+   772→    if (!mounted) return;
+   773→    setState(() {
+   774→      final listIdx = _invoices.indexWhere((inv) => inv.id == invoice.id);
+   775→      if (listIdx != -1) {
+   776→        _invoices[listIdx] = updatedInvoice;
+   777→      }
+   778→      _filterInvoices();
+   779→    });
+   780→    widget.onInvoiceUpdated();
+   781→    if (!mounted) return;
+   782→    ScaffoldMessenger.of(context).showSnackBar(
+   783→      SnackBar(
+   784→        content: Text('${invoice.clientName} → ${newStatus.label}'),
+   785→        backgroundColor: Color(newStatus.color),
+   786→        behavior: SnackBarBehavior.floating,
+   787→        duration: const Duration(seconds: 2),
+   788→      ),
+   789→    );
+   790→  }
+   791→
+   792→  Widget _buildInvoiceCard(Invoice invoice, bool isSelected, int index) {
+   793→    return Hero(
+   794→      tag: 'invoice-${invoice.id}',
+   795→      child: Card(
+   796→        elevation: 2,
+   797→        shadowColor: Colors.blue.withOpacity(0.05),
+   798→        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Constants.cardRadius)),
+   799→        child: InkWell(
+   800→          borderRadius: BorderRadius.circular(Constants.cardRadius),
+   801→          onTap: () {
+   802→            if (_isSelectionMode) {
+   803→              _toggleSelection(invoice.id);
+   804→            } else {
+   805→              _openInvoiceDetail(invoice);
+   806→            }
+   807→          },
+   808→          onLongPress: () {
+   809→            if (!_isSelectionMode) {
+   810→              setState(() {
+   811→                _isSelectionMode = true;
+   812→                _selectedIds.add(invoice.id);
+   813→              });
+   814→            }
+   815→          },
+   816→          child: Padding(
+   817→            padding: const EdgeInsets.all(16),
+   818→            child: Row(
+   819→              children: [
+   820→                if (_isSelectionMode) ...[
+   821→                  Checkbox(
+   822→                    value: isSelected,
+   823→                    onChanged: (_) => _toggleSelection(invoice.id),
+   824→                    activeColor: const Color(0xFF2563EB),
+   825→                  ),
+   826→                  const SizedBox(width: 8),
+   827→                ],
+   828→                Hero(
+   829→                  tag: 'invoice-icon-${invoice.id}',
+   830→                  child: Container(
+   831→                    width: 56,
+   832→                    height: 56,
+   833→                    decoration: BoxDecoration(
+   834→                      gradient: const LinearGradient(
+   835→                        colors: [Color(0xFF2563EB), Color(0xFF1E40AF)],
+   836→                        begin: Alignment.topLeft,
+   837→                        end: Alignment.bottomRight,
+   838→                      ),
+   839→                      borderRadius: BorderRadius.circular(12),
+   840→                    ),
+   841→                    child: const Icon(Icons.receipt, color: Colors.white, size: 28),
+   842→                  ),
+   843→                ),
+   844→                const SizedBox(width: 16),
+   845→                Expanded(
+   846→                  child: Column(
+   847→                    crossAxisAlignment: CrossAxisAlignment.start,
+   848→                    children: [
+   849→                      Text(invoice.clientName, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+   850→                      const SizedBox(height: 4),
+   851→                      Row(
+   852→                        children: [
+   853→                          Icon(Icons.calendar_today, size: 14, color: Colors.grey[600]),
+   854→                          const SizedBox(width: 4),
+   855→                          Text(_formatDate(invoice.createdAt), style: TextStyle(fontSize: 13, color: Colors.grey[600])),
+   856→                        ],
+   857→                      ),
+   858→                    ],
+   859→                  ),
+   860→                ),
+   861→                Column(
+   862→                  crossAxisAlignment: CrossAxisAlignment.end,
+   863→                  children: [
+   864→                    Text(formatCurrency(invoice.total), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF2563EB))),
+   865→                    const SizedBox(height: 4),
+   866→                    Container(
+   867→                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+   868→                      decoration: BoxDecoration(
+   869→                        color: Color(invoice.status.color).withOpacity(0.2),
+   870→                        borderRadius: BorderRadius.circular(8),
+   871→                      ),
+   872→                      child: Text(invoice.status.label, style: TextStyle(fontSize: 12, color: Color(invoice.status.color), fontWeight: FontWeight.w600)),
+   873→                    ),
+   874→                  ],
+   875→                ),
+   876→              ],
+   877→            ),
+   878→          ),
+   879→        ),
+   880→      ),
+   881→    );
+   882→  }
+   883→
+   884→  Widget _buildStatusChip(String label, int count, int color) {
+   885→    return Container(
+   886→      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+   887→      decoration: BoxDecoration(color: Color(color).withOpacity(0.1), borderRadius: BorderRadius.circular(20)),
+   888→      child: Row(
+   889→        mainAxisSize: MainAxisSize.min,
+   890→        children: [
+   891→          Text(label, style: TextStyle(fontSize: 12, color: Color(color))),
+   892→          const SizedBox(width: 4),
+   893→          Container(
+   894→            padding: const EdgeInsets.all(2),
+   895→            decoration: BoxDecoration(color: Color(color), shape: BoxShape.circle),
+   896→            constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
+   897→            child: Text(count.toString(), style: const TextStyle(fontSize: 10, color: Colors.white, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+   898→          ),
+   899→        ],
+   900→      ),
+   901→    );
+   902→  }
+   903→}

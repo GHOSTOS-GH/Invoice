@@ -1,0 +1,892 @@
+     1→// lib/screens/invoice_detail_screen.dart
+     2→import 'package:flutter/material.dart';
+     3→import 'package:flutter/services.dart';
+     4→import 'package:intl/intl.dart';
+     5→import '../models/invoice.dart';
+     6→import '../models/product.dart';
+     7→import '../services/storage_service.dart';
+     8→import '../services/pdf_service.dart';
+     9→import '../utils/formatters.dart';
+    10→import '../utils/constants.dart';
+    11→import '../widgets/last_price_hint.dart';
+    12→import '../widgets/product_grid_sheet.dart';
+    13→import 'new_invoice_screen.dart';
+    14→import 'receipt_preview_screen.dart';
+    15→
+    16→class InvoiceDetailScreen extends StatefulWidget {
+    17→  final Invoice invoice;
+    18→  final VoidCallback onInvoiceUpdated;
+    19→  const InvoiceDetailScreen({super.key, required this.invoice, required this.onInvoiceUpdated});
+    20→
+    21→  @override
+    22→  State<InvoiceDetailScreen> createState() => _InvoiceDetailScreenState();
+    23→}
+    24→
+    25→class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
+    26→  late Invoice _invoice;
+    27→  bool _isEditing = false;
+    28→  bool _isSaving = false;
+    29→  bool _isSharing = false;
+    30→  late TextEditingController _clientNameController;
+    31→  late TextEditingController _notesController;
+    32→  late TextEditingController _discountController;
+    33→  late TextEditingController _taxRateController;
+    34→  final StorageService _storageService = StorageService();
+    35→  final PdfService _pdfService = PdfService();
+    36→
+    37→  // Ajout d'articles en mode édition (via la bibliothèque produits)
+    38→  bool _isAddingItem = false;
+    39→  Product? _selectedProduct;
+    40→  late TextEditingController _quantityController;
+    41→  late TextEditingController _priceController;
+    42→  Map<String, double> _clientPrices = {};
+    43→  String _lastPriceClient = '';
+    44→
+    45→  @override
+    46→  void initState() {
+    47→    super.initState();
+    48→    _invoice = widget.invoice;
+    49→    _clientNameController = TextEditingController(text: _invoice.clientName);
+    50→    _notesController = TextEditingController(text: _invoice.notes ?? '');
+    51→    _discountController = TextEditingController(
+    52→        text: _invoice.discount == 0 ? '' : _priceInputValue(_invoice.discount));
+    53→    _taxRateController = TextEditingController(
+    54→        text: _invoice.taxRate == 0 ? '' : _priceInputValue(_invoice.taxRate));
+    55→    _quantityController = TextEditingController();
+    56→    _priceController = TextEditingController();
+    57→    _lastPriceClient = _invoice.clientName.trim().toLowerCase();
+    58→    _clientNameController.addListener(_onClientNameChangedForPrices);
+    59→    _loadClientPrices();
+    60→  }
+    61→
+    62→  @override
+    63→  void dispose() {
+    64→    _clientNameController.removeListener(_onClientNameChangedForPrices);
+    65→    _clientNameController.dispose();
+    66→    _notesController.dispose();
+    67→    _discountController.dispose();
+    68→    _taxRateController.dispose();
+    69→    _quantityController.dispose();
+    70→    _priceController.dispose();
+    71→    super.dispose();
+    72→  }
+    73→
+    74→  void _onClientNameChangedForPrices() {
+    75→    final name = _clientNameController.text.trim();
+    76→    if (name.isEmpty || name.toLowerCase() == _lastPriceClient) return;
+    77→    _lastPriceClient = name.toLowerCase();
+    78→    _loadClientPrices();
+    79→  }
+    80→
+    81→  Future<void> _loadClientPrices() async {
+    82→    final prices = await _storageService.getClientPriceMap(_lastPriceClient);
+    83→    if (!mounted) return;
+    84→    setState(() => _clientPrices = prices);
+    85→  }
+    86→
+    87→  String _formatDate(DateTime date) => DateFormat('EEEE dd MMMM yyyy à HH:mm', 'fr_FR').format(date);
+    88→
+    89→  void _toggleEdit() {
+    90→    setState(() {
+    91→      _isEditing = !_isEditing;
+    92→      if (!_isEditing) {
+    93→        _clientNameController.text = _invoice.clientName;
+    94→        _notesController.text = _invoice.notes ?? '';
+    95→        _discountController.text =
+    96→            _invoice.discount == 0 ? '' : _priceInputValue(_invoice.discount);
+    97→        _taxRateController.text =
+    98→            _invoice.taxRate == 0 ? '' : _priceInputValue(_invoice.taxRate);
+    99→        _isAddingItem = false;
+   100→        _selectedProduct = null;
+   101→        _quantityController.clear();
+   102→        _priceController.clear();
+   103→      }
+   104→    });
+   105→  }
+   106→
+   107→  void _updateItem(int index, InvoiceItem newItem) {
+   108→    final newItems = List<InvoiceItem>.from(_invoice.items);
+   109→    newItems[index] = newItem;
+   110→    setState(() {
+   111→      _invoice = _invoice.copyWith(items: newItems);
+   112→    });
+   113→  }
+   114→
+   115→  void _deleteItem(int index) {
+   116→    showDialog(
+   117→      context: context,
+   118→      builder: (context) => AlertDialog(
+   119→        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Constants.cardRadius)),
+   120→        title: const Text('Confirmer la suppression'),
+   121→        content: Text('Supprimer "${_invoice.items[index].name}" ?'),
+   122→        actions: [
+   123→          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Annuler')),
+   124→          TextButton(
+   125→            onPressed: () {
+   126→              final newItems = List<InvoiceItem>.from(_invoice.items)..removeAt(index);
+   127→              setState(() {
+   128→                _invoice = _invoice.copyWith(items: newItems);
+   129→              });
+   130→              Navigator.pop(context);
+   131→            },
+   132→            child: const Text('Supprimer', style: TextStyle(color: Colors.red)),
+   133→          ),
+   134→        ],
+   135→      ),
+   136→    );
+   137→  }
+   138→
+   139→  void _openProductGrid() {
+   140→    showModalBottomSheet(
+   141→      context: context,
+   142→      isScrollControlled: true,
+   143→      backgroundColor: Colors.transparent,
+   144→      builder: (ctx) => ProductGridSheet(onProductSelected: _onProductSelected),
+   145→    );
+   146→  }
+   147→
+   148→  void _onProductSelected(Product product) {
+   149→    setState(() {
+   150→      final isSameProduct = _selectedProduct?.id == product.id;
+   151→      _selectedProduct = product;
+   152→      if (!isSameProduct) {
+   153→        // Pré-remplit le prix avec le dernier prix vendu à ce client
+   154→        final lastPrice = _clientPrices[product.name.trim().toLowerCase()];
+   155→        if (lastPrice != null) {
+   156→          _priceController.text = _priceInputValue(lastPrice);
+   157→        } else {
+   158→          _priceController.clear();
+   159→        }
+   160→      }
+   161→    });
+   162→  }
+   163→
+   164→  String _priceInputValue(double value) =>
+   165→      value % 1 == 0 ? value.toInt().toString() : value.toString();
+   166→
+   167→  void _addNewItem() {
+   168→    final quantity = int.tryParse(_quantityController.text.trim());
+   169→    if (quantity == null || quantity <= 0) {
+   170→      ScaffoldMessenger.of(context).showSnackBar(
+   171→        const SnackBar(
+   172→          content: Text('Veuillez entrer une quantité valide'),
+   173→          backgroundColor: Colors.red,
+   174→          behavior: SnackBarBehavior.floating,
+   175→        ),
+   176→      );
+   177→      return;
+   178→    }
+   179→
+   180→    double? price = double.tryParse(_priceController.text.trim());
+   181→    if (price == null || price <= 0) {
+   182→      price = 1.0;
+   183→      _priceController.text = '1';
+   184→    }
+   185→
+   186→    if (_selectedProduct == null) {
+   187→      ScaffoldMessenger.of(context).showSnackBar(
+   188→        const SnackBar(
+   189→          content: Text('Veuillez sélectionner un produit'),
+   190→          backgroundColor: Colors.orange,
+   191→          behavior: SnackBarBehavior.floating,
+   192→        ),
+   193→      );
+   194→      return;
+   195→    }
+   196→
+   197→    final newItems = List<InvoiceItem>.from(_invoice.items)
+   198→      ..add(InvoiceItem(
+   199→        name: _selectedProduct!.name,
+   200→        quantity: quantity,
+   201→        unitPrice: price,
+   202→      ));
+   203→    setState(() {
+   204→      _invoice = _invoice.copyWith(items: newItems);
+   205→      _isAddingItem = false;
+   206→      _selectedProduct = null;
+   207→      _quantityController.clear();
+   208→      _priceController.clear();
+   209→    });
+   210→  }
+   211→
+   212→  Widget _buildAddItemPanel() {
+   213→    return Container(
+   214→      padding: const EdgeInsets.all(16),
+   215→      decoration: BoxDecoration(
+   216→        color: Colors.white,
+   217→        borderRadius: BorderRadius.circular(16),
+   218→        border: Border.all(color: const Color(0xFFE2E8F0)),
+   219→        boxShadow: [
+   220→          BoxShadow(
+   221→            color: const Color(0xFF2563EB).withValues(alpha: 0.06),
+   222→            blurRadius: 12,
+   223→            offset: const Offset(0, 4),
+   224→          ),
+   225→        ],
+   226→      ),
+   227→      child: Column(
+   228→        crossAxisAlignment: CrossAxisAlignment.stretch,
+   229→        children: [
+   230→          Row(
+   231→            children: [
+   232→              const Icon(Icons.add_box_outlined, color: Color(0xFF2563EB), size: 20),
+   233→              const SizedBox(width: 8),
+   234→              const Text('Nouvel article', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+   235→              const Spacer(),
+   236→              IconButton(
+   237→                icon: const Icon(Icons.close, size: 20),
+   238→                onPressed: () {
+   239→                  setState(() {
+   240→                    _isAddingItem = false;
+   241→                    _selectedProduct = null;
+   242→                    _quantityController.clear();
+   243→                    _priceController.clear();
+   244→                  });
+   245→                },
+   246→              ),
+   247→            ],
+   248→          ),
+   249→          const SizedBox(height: 8),
+   250→          GestureDetector(
+   251→            onTap: _openProductGrid,
+   252→            child: Container(
+   253→              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+   254→              decoration: BoxDecoration(
+   255→                color: const Color(0xFFF1F5F9),
+   256→                borderRadius: BorderRadius.circular(14),
+   257→                border: Border.all(color: const Color(0xFFE2E8F0)),
+   258→              ),
+   259→              child: Row(
+   260→                children: [
+   261→                  Icon(Icons.search, color: Colors.grey[600]),
+   262→                  const SizedBox(width: 12),
+   263→                  Expanded(
+   264→                    child: Text(
+   265→                      _selectedProduct?.name ?? 'Appuyez pour choisir un produit',
+   266→                      style: TextStyle(
+   267→                        fontSize: 15,
+   268→                        color: _selectedProduct != null ? Colors.black : Colors.grey[600],
+   269→                      ),
+   270→                    ),
+   271→                  ),
+   272→                  const Icon(Icons.arrow_drop_down, color: Colors.grey),
+   273→                ],
+   274→              ),
+   275→            ),
+   276→          ),
+   277→          const SizedBox(height: 12),
+   278→          Row(
+   279→            children: [
+   280→              Expanded(
+   281→                child: TextField(
+   282→                  controller: _quantityController,
+   283→                  keyboardType: TextInputType.number,
+   284→                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+   285→                  decoration: const InputDecoration(
+   286→                    labelText: 'Quantité *',
+   287→                    prefixIcon: Icon(Icons.numbers),
+   288→                    isDense: true,
+   289→                  ),
+   290→                ),
+   291→              ),
+   292→              const SizedBox(width: 12),
+   293→              Expanded(
+   294→                child: TextField(
+   295→                  controller: _priceController,
+   296→                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+   297→                  inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*'))],
+   298→                  decoration: const InputDecoration(
+   299→                    labelText: 'Prix unitaire (FCFA)',
+   300→                    prefixIcon: Icon(Icons.attach_money),
+   301→                    isDense: true,
+   302→                  ),
+   303→                ),
+   304→              ),
+   305→            ],
+   306→          ),
+   307→          LastPriceHint(
+   308→            lastPrice: _selectedProduct == null
+   309→                ? null
+   310→                : _clientPrices[_selectedProduct!.name.trim().toLowerCase()],
+   311→            clientName: _invoice.clientName,
+   312→          ),
+   313→          const SizedBox(height: 14),
+   314→          ElevatedButton.icon(
+   315→            onPressed: _addNewItem,
+   316→            icon: const Icon(Icons.check),
+   317→            label: const Text('Ajouter l\'article'),
+   318→            style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 14)),
+   319→          ),
+   320→        ],
+   321→      ),
+   322→    );
+   323→  }
+   324→
+   325→  Future<void> _saveChanges() async {
+   326→    setState(() => _isSaving = true);
+   327→    // Construit explicitement la facture (plutôt que copyWith) pour permettre
+   328→    // d'effacer réellement les notes quand le champ est vidé.
+   329→    double parsePositive(String text) {
+   330→      final value = double.tryParse(text.trim().replaceAll(',', '.')) ?? 0;
+   331→      return value < 0 ? 0 : value;
+   332→    }
+   333→
+   334→    final updatedInvoice = Invoice(
+   335→      id: _invoice.id,
+   336→      clientName: _clientNameController.text.trim().isEmpty
+   337→          ? 'Client inconnu'
+   338→          : _clientNameController.text.trim(),
+   339→      createdAt: _invoice.createdAt,
+   340→      items: _invoice.items.toList(),
+   341→      status: _invoice.status,
+   342→      notes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
+   343→      discount: parsePositive(_discountController.text),
+   344→      taxRate: parsePositive(_taxRateController.text).clamp(0, 100).toDouble(),
+   345→    );
+   346→
+   347→    final all = await _storageService.loadInvoices();
+   348→    final idx = all.indexWhere((inv) => inv.id == updatedInvoice.id);
+   349→    if (idx != -1) {
+   350→      all[idx] = updatedInvoice;
+   351→      await _storageService.saveInvoices(all);
+   352→    }
+   353→
+   354→    setState(() {
+   355→      _invoice = updatedInvoice;
+   356→      _isEditing = false;
+   357→      _isSaving = false;
+   358→    });
+   359→
+   360→    widget.onInvoiceUpdated();
+   361→    if (!mounted) return;
+   362→    ScaffoldMessenger.of(context).showSnackBar(
+   363→      const SnackBar(content: Text('Facture mise à jour'), backgroundColor: Colors.green, behavior: SnackBarBehavior.floating),
+   364→    );
+   365→  }
+   366→
+   367→  Future<void> _deleteInvoice() async {
+   368→    final confirm = await showDialog<bool>(
+   369→      context: context,
+   370→      builder: (context) => AlertDialog(
+   371→        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Constants.cardRadius)),
+   372→        title: const Text('Supprimer la facture ?'),
+   373→        content: const Text('Cette action est irréversible.'),
+   374→        actions: [
+   375→          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Annuler')),
+   376→          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Supprimer', style: TextStyle(color: Colors.red))),
+   377→        ],
+   378→      ),
+   379→    );
+   380→    if (confirm != true) return;
+   381→
+   382→    final all = await _storageService.loadInvoices();
+   383→    all.removeWhere((inv) => inv.id == _invoice.id);
+   384→    await _storageService.saveInvoices(all);
+   385→
+   386→    if (!mounted) return;
+   387→    widget.onInvoiceUpdated();
+   388→    Navigator.pop(context);
+   389→  }
+   390→
+   391→  void _toggleArchive() async {
+   392→    final newStatus = _invoice.status == InvoiceStatus.archivee ? InvoiceStatus.enCours : InvoiceStatus.archivee;
+   393→    setState(() {
+   394→      _invoice = _invoice.copyWith(status: newStatus);
+   395→    });
+   396→    await _saveChanges(); // save immédiatement
+   397→  }
+   398→
+   399→  void _duplicateInvoice() {
+   400→    final dup = Invoice(
+   401→      id: DateTime.now().millisecondsSinceEpoch.toString(), // ID unique
+   402→      clientName: _invoice.clientName,
+   403→      createdAt: DateTime.now(),
+   404→      items: _invoice.items.map((item) => item.copyWith()).toList(),
+   405→      notes: _invoice.notes,
+   406→    );
+   407→    Navigator.push(
+   408→      context,
+   409→      MaterialPageRoute(builder: (_) => NewInvoiceScreen(onInvoiceCreated: widget.onInvoiceUpdated, initialInvoice: dup)),
+   410→    );
+   411→  }
+   412→
+   413→  void _showShareSheet() {
+   414→    showModalBottomSheet(
+   415→      context: context,
+   416→      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+   417→      builder: (ctx) => SafeArea(
+   418→        child: Padding(
+   419→          padding: const EdgeInsets.symmetric(vertical: 12),
+   420→          child: Column(
+   421→            mainAxisSize: MainAxisSize.min,
+   422→            children: [
+   423→              Container(width: 36, height: 4, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2))),
+   424→              const SizedBox(height: 16),
+   425→              const Text('Partager la facture', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+   426→              const SizedBox(height: 8),
+   427→              _shareOption(ctx, icon: Icons.print_outlined, color: const Color(0xFF2563EB), label: 'Reçu thermique (58 / 80 mm)', subtitle: 'Bluetooth (Android) · Wi-Fi (Android + iPhone)', onTap: () {
+   428→                Navigator.pop(ctx);
+   429→                Navigator.push(
+   430→                  context,
+   431→                  MaterialPageRoute(
+   432→                    builder: (_) => ReceiptPreviewScreen(invoice: _invoice),
+   433→                  ),
+   434→                );
+   435→              }),
+   436→              _shareOption(ctx, icon: Icons.picture_as_pdf, color: const Color(0xFFDC2626), label: 'Document PDF', subtitle: 'Idéal pour l\'impression', onTap: () async {
+   437→                Navigator.pop(ctx);
+   438→                setState(() => _isSharing = true);
+   439→                try {
+   440→                  await _pdfService.shareAsPdf(_invoice);
+   441→                } catch (e) {
+   442→                  if (!mounted) return;
+   443→                  ScaffoldMessenger.of(context).showSnackBar(
+   444→                    SnackBar(content: Text('Erreur PDF : $e'), backgroundColor: Colors.red, behavior: SnackBarBehavior.floating),
+   445→                  );
+   446→                } finally {
+   447→                  if (mounted) setState(() => _isSharing = false);
+   448→                }
+   449→              }),
+   450→              _shareOption(ctx, icon: Icons.image_outlined, color: const Color(0xFF2563EB), label: 'Image PNG', subtitle: 'Pour partager sur WhatsApp, etc.', onTap: () async {
+   451→                Navigator.pop(ctx);
+   452→                setState(() => _isSharing = true);
+   453→                try {
+   454→                  await _pdfService.shareAsPng(_invoice);
+   455→                } catch (e) {
+   456→                  if (!mounted) return;
+   457→                  ScaffoldMessenger.of(context).showSnackBar(
+   458→                    SnackBar(content: Text('Erreur PNG : $e'), backgroundColor: Colors.red, behavior: SnackBarBehavior.floating),
+   459→                  );
+   460→                } finally {
+   461→                  if (mounted) setState(() => _isSharing = false);
+   462→                }
+   463→              }),
+   464→              _shareOption(ctx, icon: Icons.photo_camera_outlined, color: const Color(0xFF16A34A), label: 'Image JPG', subtitle: 'Format photo compressé', onTap: () async {
+   465→                Navigator.pop(ctx);
+   466→                setState(() => _isSharing = true);
+   467→                try {
+   468→                  await _pdfService.shareAsJpg(_invoice);
+   469→                } catch (e) {
+   470→                  if (!mounted) return;
+   471→                  ScaffoldMessenger.of(context).showSnackBar(
+   472→                    SnackBar(content: Text('Erreur JPG : $e'), backgroundColor: Colors.red, behavior: SnackBarBehavior.floating),
+   473→                  );
+   474→                } finally {
+   475→                  if (mounted) setState(() => _isSharing = false);
+   476→                }
+   477→              }),
+   478→              const SizedBox(height: 8),
+   479→            ],
+   480→          ),
+   481→        ),
+   482→      ),
+   483→    );
+   484→  }
+   485→
+   486→  Widget _shareOption(BuildContext ctx, {required IconData icon, required Color color, required String label, required String subtitle, required VoidCallback onTap}) {
+   487→    return ListTile(
+   488→      leading: Container(width: 44, height: 44, decoration: BoxDecoration(color: color.withAlpha(26), borderRadius: BorderRadius.circular(12)), child: Icon(icon, color: color)),
+   489→      title: Text(label, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+   490→      subtitle: Text(subtitle, style: TextStyle(color: Colors.grey[500], fontSize: 12)),
+   491→      onTap: onTap,
+   492→    );
+   493→  }
+   494→
+   495→  @override
+   496→  Widget build(BuildContext context) {
+   497→    return Scaffold(
+   498→      backgroundColor: const Color(0xFFF8FAFC),
+   499→      appBar: AppBar(
+   500→        title: Text(_isEditing ? 'Modifier' : 'Détails'),
+   501→        elevation: 0,
+   502→        backgroundColor: Colors.white,
+   503→        foregroundColor: const Color(0xFF1E293B),
+   504→        shape: const Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
+   505→        actions: _isEditing
+   506→            ? [
+   507→                IconButton(icon: const Icon(Icons.cancel), onPressed: _toggleEdit, tooltip: 'Annuler'),
+   508→                IconButton(
+   509→                  icon: _isSaving ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.save),
+   510→                  onPressed: _isSaving ? null : _saveChanges,
+   511→                  tooltip: 'Enregistrer',
+   512→                ),
+   513→              ]
+   514→            : [
+   515→                IconButton(icon: Icon(_invoice.status == InvoiceStatus.archivee ? Icons.unarchive : Icons.archive), onPressed: _toggleArchive, tooltip: _invoice.status == InvoiceStatus.archivee ? 'Désarchiver' : 'Archiver'),
+   516→                IconButton(icon: const Icon(Icons.content_copy), onPressed: _duplicateInvoice, tooltip: 'Dupliquer'),
+   517→                IconButton(icon: const Icon(Icons.edit), onPressed: _toggleEdit, tooltip: 'Modifier'),
+   518→                IconButton(icon: const Icon(Icons.delete), onPressed: _deleteInvoice, tooltip: 'Supprimer', color: Colors.red),
+   519→              ],
+   520→      ),
+   521→      body: SingleChildScrollView(
+   522→        child: Column(
+   523→          children: [
+   524→            Container(
+   525→              width: double.infinity,
+   526→              padding: const EdgeInsets.all(24),
+   527→              decoration: BoxDecoration(
+   528→                color: Colors.white,
+   529→                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 2))],
+   530→              ),
+   531→              child: Column(
+   532→                crossAxisAlignment: CrossAxisAlignment.start,
+   533→                children: [
+   534→                  Row(
+   535→                    children: [
+   536→                      Hero(
+   537→                        tag: 'invoice-icon-${_invoice.id}',
+   538→                        child: Container(
+   539→                          padding: const EdgeInsets.all(12),
+   540→                          decoration: BoxDecoration(gradient: const LinearGradient(colors: [Color(0xFF2563EB), Color(0xFF1E40AF)]), borderRadius: BorderRadius.circular(12)),
+   541→                          child: const Icon(Icons.receipt_long, color: Colors.white, size: 28),
+   542→                        ),
+   543→                      ),
+   544→                      const SizedBox(width: 16),
+   545→                      Expanded(
+   546→                        child: Column(
+   547→                          crossAxisAlignment: CrossAxisAlignment.start,
+   548→                          children: [
+   549→                            const Text('FACTURE', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF64748B), letterSpacing: 1.5)),
+   550→                            const SizedBox(height: 4),
+   551→                            Text(
+   552→                              '#${_invoice.id.length >= 6 ? _invoice.id.substring(_invoice.id.length - 6) : _invoice.id}',
+   553→                              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF2563EB)),
+   554→                            ),
+   555→                          ],
+   556→                        ),
+   557→                      ),
+   558→                    ],
+   559→                  ),
+   560→                  const SizedBox(height: 20),
+   561→                  _isEditing
+   562→                      ? TextField(
+   563→                          controller: _clientNameController,
+   564→                          decoration: InputDecoration(labelText: 'Nom du client', prefixIcon: const Icon(Icons.person, color: Color(0xFF2563EB)), border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)), filled: true, fillColor: const Color(0xFFF1F5F9)),
+   565→                        )
+   566→                      : _InfoRow(icon: Icons.person, label: 'Client', value: _invoice.clientName),
+   567→                  const SizedBox(height: 12),
+   568→                  _InfoRow(icon: Icons.calendar_today, label: 'Date', value: _formatDate(_invoice.createdAt)),
+   569→                  const SizedBox(height: 12),
+   570→                  _isEditing
+   571→                      ? DropdownButton<InvoiceStatus>(
+   572→                          value: _invoice.status,
+   573→                          isExpanded: true,
+   574→                          items: InvoiceStatus.values.map((s) {
+   575→                            return DropdownMenuItem(
+   576→                              value: s,
+   577→                              child: Container(
+   578→                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+   579→                                decoration: BoxDecoration(color: Color(s.color).withAlpha(26), borderRadius: BorderRadius.circular(8)),
+   580→                                child: Text(s.label, style: TextStyle(color: Color(s.color), fontWeight: FontWeight.w600)),
+   581→                              ),
+   582→                            );
+   583→                          }).toList(),
+   584→                          onChanged: (v) {
+   585→                            if (v != null) setState(() => _invoice = _invoice.copyWith(status: v));
+   586→                          },
+   587→                          underline: Container(),
+   588→                        )
+   589→                      : Row(
+   590→                          children: [
+   591→                            Icon(Icons.local_shipping, size: 20, color: Colors.blue[700]),
+   592→                            const SizedBox(width: 12),
+   593→                            Text('Statut : ', style: TextStyle(fontSize: 14, color: Colors.grey[600])),
+   594→                            Container(
+   595→                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+   596→                              decoration: BoxDecoration(color: Color(_invoice.status.color).withAlpha(40), borderRadius: BorderRadius.circular(8)),
+   597→                              child: Text(_invoice.status.label, style: TextStyle(fontSize: 14, color: Color(_invoice.status.color), fontWeight: FontWeight.w600)),
+   598→                            ),
+   599→                          ],
+   600→                        ),
+   601→                  if (_isEditing) ...[
+   602→                    const SizedBox(height: 16),
+   603→                    Row(
+   604→                      children: [
+   605→                        Expanded(
+   606→                          child: TextField(
+   607→                            controller: _discountController,
+   608→                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+   609→                            inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*'))],
+   610→                            decoration: InputDecoration(labelText: 'Remise (FCFA)', prefixIcon: const Icon(Icons.percent, color: Color(0xFF2563EB)), border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)), filled: true, fillColor: const Color(0xFFF1F5F9)),
+   611→                          ),
+   612→                        ),
+   613→                        const SizedBox(width: 12),
+   614→                        Expanded(
+   615→                          child: TextField(
+   616→                            controller: _taxRateController,
+   617→                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+   618→                            inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*'))],
+   619→                            decoration: InputDecoration(labelText: 'TVA (%)', prefixIcon: const Icon(Icons.receipt, color: Color(0xFF2563EB)), border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)), filled: true, fillColor: const Color(0xFFF1F5F9)),
+   620→                          ),
+   621→                        ),
+   622→                      ],
+   623→                    ),
+   624→                    const SizedBox(height: 16),
+   625→                    Text('Notes (optionnel)', style: const TextStyle(fontSize: 14, color: Color(0xFF64748B))),
+   626→                    const SizedBox(height: 8),
+   627→                    TextField(
+   628→                      controller: _notesController,
+   629→                      maxLines: 3,
+   630→                      decoration: InputDecoration(hintText: 'Ajoutez vos notes ici...', prefixIcon: const Icon(Icons.description, color: Color(0xFF2563EB)), border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)), filled: true, fillColor: const Color(0xFFF1F5F9)),
+   631→                    ),
+   632→                  ] else if (_invoice.notes != null && _invoice.notes!.isNotEmpty) ...[
+   633→                    const SizedBox(height: 16),
+   634→                    Container(
+   635→                      width: double.infinity,
+   636→                      padding: const EdgeInsets.all(12),
+   637→                      decoration: BoxDecoration(color: const Color(0xFFF1F5F9), borderRadius: BorderRadius.circular(14), border: Border.all(color: const Color(0xFFE2E8F0))),
+   638→                      child: Text(_invoice.notes!, style: const TextStyle(fontSize: 14, color: Color(0xFF64748B))),
+   639→                    ),
+   640→                  ],
+   641→                ],
+   642→              ),
+   643→            ),
+   644→            Padding(
+   645→              padding: const EdgeInsets.all(16),
+   646→              child: Column(
+   647→                crossAxisAlignment: CrossAxisAlignment.start,
+   648→                children: [
+   649→                  Row(
+   650→                    children: [
+   651→                      const Text('Articles', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1E293B))),
+   652→                      const SizedBox(width: 8),
+   653→                      Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2), decoration: BoxDecoration(color: const Color(0xFFDBEAFE), borderRadius: BorderRadius.circular(10)), child: Text('${_invoice.items.length}', style: const TextStyle(color: Color(0xFF2563EB), fontWeight: FontWeight.bold, fontSize: 13))),
+   654→                      const SizedBox(width: 6),
+   655→                      Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2), decoration: BoxDecoration(color: const Color(0xFFFEF3C7), borderRadius: BorderRadius.circular(10)), child: Row(
+   656→                        mainAxisSize: MainAxisSize.min,
+   657→                        children: [
+   658→                          const Icon(Icons.inventory_2, size: 12, color: Color(0xFFD97706)),
+   659→                          const SizedBox(width: 3),
+   660→                          Text('${_invoice.totalQuantity} unités', style: const TextStyle(color: Color(0xFFD97706), fontWeight: FontWeight.bold, fontSize: 12)),
+   661→                        ],
+   662→                      )),
+   663→                    ],
+   664→                  ),
+   665→                  const SizedBox(height: 12),
+   666→                  ..._invoice.items.asMap().entries.map((entry) {
+   667→                    final index = entry.key;
+   668→                    final item = entry.value;
+   669→                    return Card(
+   670→                      margin: const EdgeInsets.only(bottom: 10),
+   671→                      elevation: 0,
+   672→                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Constants.cardRadius), side: BorderSide(color: Colors.grey.withAlpha(30))),
+   673→                      child: Padding(
+   674→                        padding: const EdgeInsets.all(14),
+   675→                        child: _isEditing
+   676→                            ? _EditableItemTile(index: index, item: item, onUpdate: (u) => _updateItem(index, u), onDelete: () => _deleteItem(index))
+   677→                            : _CompactItemView(index: index, item: item),
+   678→                      ),
+   679→                    );
+   680→                  }),
+   681→                  if (_isEditing) ...[
+   682→                    const SizedBox(height: 4),
+   683→                    if (_isAddingItem)
+   684→                      _buildAddItemPanel()
+   685→                    else
+   686→                      SizedBox(
+   687→                        width: double.infinity,
+   688→                        child: OutlinedButton.icon(
+   689→                          onPressed: () => setState(() => _isAddingItem = true),
+   690→                          icon: const Icon(Icons.add, color: Color(0xFF2563EB)),
+   691→                          label: const Text('Ajouter un article', style: TextStyle(color: Color(0xFF2563EB))),
+   692→                          style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)), side: const BorderSide(color: Color(0xFF2563EB), width: 2)),
+   693→                        ),
+   694→                      ),
+   695→                  ],
+   696→                  const SizedBox(height: 16),
+   697→                  Container(
+   698→                    padding: const EdgeInsets.all(20),
+   699→                    decoration: BoxDecoration(gradient: const LinearGradient(colors: [Color(0xFF2563EB), Color(0xFF1E40AF)]), borderRadius: BorderRadius.circular(16)),
+   700→                    child: Row(
+   701→                      children: [
+   702→                        Expanded(
+   703→                          child: Column(
+   704→                            crossAxisAlignment: CrossAxisAlignment.start,
+   705→                            children: [
+   706→                              if (_invoice.hasBreakdown) ...[
+   707→                                _TotalBreakdownLine('Sous-total', formatCurrency(_invoice.total)),
+   708→                                if (_invoice.discount > 0)
+   709→                                  _TotalBreakdownLine('Remise', '-${formatCurrency(_invoice.discount)}'),
+   710→                                if (_invoice.taxRate > 0)
+   711→                                  _TotalBreakdownLine('TVA ${formatNumber(_invoice.taxRate)}%', '+${formatCurrency(_invoice.taxAmount)}'),
+   712→                                const SizedBox(height: 8),
+   713→                              ],
+   714→                              const Text('TOTAL À PAYER', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white70, letterSpacing: 1.2)),
+   715→                              const SizedBox(height: 6),
+   716→                              Text(formatCurrency(_invoice.payableTotal), style: const TextStyle(fontSize: 26, fontWeight: FontWeight.bold, color: Colors.white)),
+   717→                            ],
+   718→                          ),
+   719→                        ),
+   720→                        GestureDetector(
+   721→                          onTap: _isSharing ? null : _showShareSheet,
+   722→                          child: Container(
+   723→                            padding: const EdgeInsets.all(12),
+   724→                            decoration: BoxDecoration(color: Colors.white.withAlpha(40), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.white.withAlpha(60))),
+   725→                            child: _isSharing ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Icon(Icons.share, color: Colors.white, size: 24),
+   726→                          ),
+   727→                        ),
+   728→                      ],
+   729→                    ),
+   730→                  ),
+   731→                  const SizedBox(height: 24),
+   732→                ],
+   733→              ),
+   734→            ),
+   735→          ],
+   736→        ),
+   737→      ),
+   738→    );
+   739→  }
+   740→}
+   741→
+   742→class _TotalBreakdownLine extends StatelessWidget {
+   743→  final String label;
+   744→  final String value;
+   745→  const _TotalBreakdownLine(this.label, this.value);
+   746→
+   747→  @override
+   748→  Widget build(BuildContext context) {
+   749→    return Row(
+   750→      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+   751→      children: [
+   752→        Text(label, style: const TextStyle(fontSize: 11, color: Colors.white70)),
+   753→        Text(value, style: const TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.w600)),
+   754→      ],
+   755→    );
+   756→  }
+   757→}
+   758→
+   759→class _CompactItemView extends StatelessWidget {
+   760→  final int index;
+   761→  final InvoiceItem item;
+   762→  const _CompactItemView({required this.index, required this.item});
+   763→
+   764→  @override
+   765→  Widget build(BuildContext context) {
+   766→    return Column(
+   767→      crossAxisAlignment: CrossAxisAlignment.start,
+   768→      children: [
+   769→        Row(
+   770→          children: [
+   771→            Container(width: 28, height: 28, decoration: const BoxDecoration(color: Color(0xFFDBEAFE), shape: BoxShape.circle), child: Center(child: Text('${index + 1}', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF2563EB), fontSize: 12)))),
+   772→            const SizedBox(width: 10),
+   773→            Expanded(child: Text(item.name, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold))),
+   774→            Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4), decoration: BoxDecoration(color: const Color(0xFF2563EB).withAlpha(20), borderRadius: BorderRadius.circular(8), border: Border.all(color: const Color(0xFF2563EB).withAlpha(60))), child: Text('×${item.quantity}', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF2563EB)))),
+   775→          ],
+   776→        ),
+   777→        const SizedBox(height: 8),
+   778→        Row(
+   779→          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+   780→          children: [
+   781→            Text('Prix : ${formatCurrency(item.unitPrice)}', style: const TextStyle(fontSize: 13, color: Color(0xFF64748B))),
+   782→            Text(formatCurrency(item.subtotal), style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFF2563EB))),
+   783→          ],
+   784→        ),
+   785→      ],
+   786→    );
+   787→  }
+   788→}
+   789→
+   790→class _InfoRow extends StatelessWidget {
+   791→  final IconData icon;
+   792→  final String label;
+   793→  final String value;
+   794→  const _InfoRow({required this.icon, required this.label, required this.value});
+   795→
+   796→  @override
+   797→  Widget build(BuildContext context) {
+   798→    return Row(
+   799→      children: [
+   800→        Icon(icon, size: 18, color: const Color(0xFF2563EB)),
+   801→        const SizedBox(width: 10),
+   802→        Text('$label : ', style: const TextStyle(fontSize: 14, color: Color(0xFF64748B))),
+   803→        Expanded(child: Text(value, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF1E293B)))),
+   804→      ],
+   805→    );
+   806→  }
+   807→}
+   808→
+   809→class _EditableItemTile extends StatefulWidget {
+   810→  final int index;
+   811→  final InvoiceItem item;
+   812→  final Function(InvoiceItem) onUpdate;
+   813→  final VoidCallback onDelete;
+   814→  const _EditableItemTile({required this.index, required this.item, required this.onUpdate, required this.onDelete});
+   815→
+   816→  @override
+   817→  State<_EditableItemTile> createState() => _EditableItemTileState();
+   818→}
+   819→
+   820→class _EditableItemTileState extends State<_EditableItemTile> {
+   821→  late TextEditingController _nameController;
+   822→  late TextEditingController _quantityController;
+   823→  late TextEditingController _priceController;
+   824→
+   825→  @override
+   826→  void initState() {
+   827→    super.initState();
+   828→    _nameController = TextEditingController(text: widget.item.name);
+   829→    _quantityController = TextEditingController(text: widget.item.quantity.toString());
+   830→    _priceController = TextEditingController(text: widget.item.unitPrice.toString());
+   831→  }
+   832→
+   833→  @override
+   834→  void didUpdateWidget(covariant _EditableItemTile oldWidget) {
+   835→    super.didUpdateWidget(oldWidget);
+   836→    // Re-synchronise les champs quand l'article change (ex: suppression multiple
+   837→    // qui décale les index) pour éviter que les valeurs se mélangent.
+   838→    if (!identical(oldWidget.item, widget.item)) {
+   839→      _nameController.text = widget.item.name;
+   840→      _quantityController.text = widget.item.quantity.toString();
+   841→      _priceController.text = widget.item.unitPrice.toString();
+   842→    }
+   843→  }
+   844→
+   845→  @override
+   846→  void dispose() {
+   847→    _nameController.dispose();
+   848→    _quantityController.dispose();
+   849→    _priceController.dispose();
+   850→    super.dispose();
+   851→  }
+   852→
+   853→  void _update() {
+   854→    final quantity = int.tryParse(_quantityController.text);
+   855→    final price = double.tryParse(_priceController.text);
+   856→    if (quantity == null || quantity <= 0 || price == null || price <= 0) {
+   857→      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Valeurs invalides'), backgroundColor: Colors.red));
+   858→      return;
+   859→    }
+   860→    widget.onUpdate(widget.item.copyWith(
+   861→      name: _nameController.text.trim().isEmpty ? 'Sans nom' : _nameController.text.trim(),
+   862→      quantity: quantity,
+   863→      unitPrice: price,
+   864→    ));
+   865→  }
+   866→
+   867→  @override
+   868→  Widget build(BuildContext context) {
+   869→    return Column(
+   870→      crossAxisAlignment: CrossAxisAlignment.start,
+   871→      children: [
+   872→        Row(
+   873→          children: [
+   874→            Container(width: 28, height: 28, decoration: const BoxDecoration(color: Color(0xFFDBEAFE), shape: BoxShape.circle), child: Center(child: Text('${widget.index + 1}', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF2563EB), fontSize: 12)))),
+   875→            const SizedBox(width: 10),
+   876→            Expanded(child: TextField(controller: _nameController, decoration: const InputDecoration(labelText: 'Nom', border: OutlineInputBorder(), isDense: true))),
+   877→          ],
+   878→        ),
+   879→        const SizedBox(height: 10),
+   880→        Row(
+   881→          children: [
+   882→            Expanded(child: TextField(controller: _quantityController, keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly], decoration: const InputDecoration(labelText: 'Quantité', border: OutlineInputBorder(), isDense: true))),
+   883→            const SizedBox(width: 8),
+   884→            Expanded(child: TextField(controller: _priceController, keyboardType: const TextInputType.numberWithOptions(decimal: true), inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*'))], decoration: const InputDecoration(labelText: 'Prix unitaire', border: OutlineInputBorder(), isDense: true))),
+   885→            IconButton(icon: const Icon(Icons.check, color: Colors.green), onPressed: _update, tooltip: 'Valider'),
+   886→            IconButton(icon: const Icon(Icons.delete, color: Colors.red), onPressed: widget.onDelete, tooltip: 'Supprimer'),
+   887→          ],
+   888→        ),
+   889→      ],
+   890→    );
+   891→  }
+   892→}

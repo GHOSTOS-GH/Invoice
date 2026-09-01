@@ -1,0 +1,793 @@
+     1→// lib/screens/new_invoice_screen.dart
+     2→import 'package:flutter/material.dart';
+     3→import 'package:flutter/services.dart';
+     4→import '../models/invoice.dart';
+     5→import '../models/product.dart';
+     6→import '../services/storage_service.dart';
+     7→import '../services/history_service.dart'; 
+     8→import '../utils/formatters.dart';
+     9→import '../utils/constants.dart';
+    10→import '../widgets/product_grid_sheet.dart';
+    11→import '../widgets/last_price_hint.dart';
+    12→
+    13→class NewInvoiceScreen extends StatefulWidget {
+    14→  final VoidCallback onInvoiceCreated;
+    15→  final Invoice? initialInvoice;
+    16→  const NewInvoiceScreen({super.key, required this.onInvoiceCreated, this.initialInvoice});
+    17→
+    18→  @override
+    19→  State<NewInvoiceScreen> createState() => _NewInvoiceScreenState();
+    20→}
+    21→
+    22→class _NewInvoiceScreenState extends State<NewInvoiceScreen> with WidgetsBindingObserver {
+    23→  final _clientNameController = TextEditingController();
+    24→  final _quantityController = TextEditingController();
+    25→  final _priceController = TextEditingController();
+    26→  final _storageService = StorageService();
+    27→  final _historyService = HistoryService();
+    28→  final List<InvoiceItem> _items = [];
+    29→  bool _isAddingItem = false;
+    30→  Product? _selectedProduct;
+    31→  bool _isLoading = false;
+    32→  List<String> _clientSuggestions = [];
+    33→  bool _showClientSuggestions = false;
+    34→  final FocusNode _clientFocusNode = FocusNode();
+    35→
+    36→  // Dernier prix par produit (clé : nom du produit en minuscules) pour le client saisi
+    37→  Map<String, double> _clientPrices = {};
+    38→  String _lastPriceClient = '';
+    39→  int _priceLoadToken = 0;
+    40→
+    41→  @override
+    42→  void initState() {
+    43→    super.initState();
+    44→    WidgetsBinding.instance.addObserver(this);
+    45→    _clientNameController.addListener(_onClientNameChanged);
+    46→    _loadInitialData();
+    47→    _clientFocusNode.addListener(() {
+    48→      if (!_clientFocusNode.hasFocus) {
+    49→        setState(() => _showClientSuggestions = false);
+    50→      }
+    51→    });
+    52→  }
+    53→
+    54→  Future<void> _loadInitialData() async {
+    55→    if (widget.initialInvoice != null) {
+    56→      _clientNameController.text = widget.initialInvoice!.clientName;
+    57→      _items.addAll(widget.initialInvoice!.items.map((item) => item.copyWith()));
+    58→    } else {
+    59→      final draft = await _storageService.loadDraft();
+    60→      if (!mounted) return;
+    61→      if (draft != null) {
+    62→        _clientNameController.text = draft.clientName;
+    63→        _items.addAll(draft.items);
+    64→      }
+    65→    }
+    66→    setState(() {});
+    67→  }
+    68→
+    69→  @override
+    70→  void didChangeAppLifecycleState(AppLifecycleState state) {
+    71→    if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+    72→      _saveDraft();
+    73→    }
+    74→  }
+    75→
+    76→  @override
+    77→  void dispose() {
+    78→    WidgetsBinding.instance.removeObserver(this);
+    79→    _clientNameController.removeListener(_onClientNameChanged);
+    80→    _clientNameController.dispose();
+    81→    _quantityController.dispose();
+    82→    _priceController.dispose();
+    83→    _clientFocusNode.dispose();
+    84→    _saveDraft();
+    85→    super.dispose();
+    86→  }
+    87→
+    88→  Future<void> _saveDraft() async {
+    89→    if (_items.isEmpty && _clientNameController.text.trim().isEmpty) {
+    90→      await _storageService.clearDraft();
+    91→      return;
+    92→    }
+    93→    final draft = Invoice(
+    94→      id: 'draft',
+    95→      clientName: _clientNameController.text.trim().isEmpty
+    96→          ? 'Client inconnu'
+    97→          : _clientNameController.text.trim(),
+    98→      createdAt: DateTime.now(),
+    99→      items: List.from(_items),
+   100→    );
+   101→    await _storageService.saveDraft(draft);
+   102→  }
+   103→
+   104→  void _onClientNameChanged() async {
+   105→    final clientText = _clientNameController.text;
+   106→    if (clientText.isEmpty) {
+   107→      setState(() {
+   108→        _showClientSuggestions = false;
+   109→        _clientPrices = {};
+   110→        _lastPriceClient = '';
+   111→      });
+   112→      return;
+   113→    }
+   114→    final suggestions = await _historyService.searchClientNames(clientText);
+   115→    if (!mounted) return;
+   116→
+   117→    // Charge (une seule fois par nom de client) la table des derniers prix
+   118→    if (clientText.trim().toLowerCase() != _lastPriceClient) {
+   119→      final token = ++_priceLoadToken;
+   120→      final prices = await _storageService.getClientPriceMap(clientText);
+   121→      if (!mounted || token != _priceLoadToken) return;
+   122→      _clientPrices = prices;
+   123→      _lastPriceClient = clientText.trim().toLowerCase();
+   124→    }
+   125→
+   126→    setState(() {
+   127→      _clientSuggestions = suggestions;
+   128→      _showClientSuggestions = suggestions.isNotEmpty && _clientFocusNode.hasFocus;
+   129→    });
+   130→  }
+   131→
+   132→  void _addItem() {
+   133→    final quantity = int.tryParse(_quantityController.text.trim());
+   134→    if (quantity == null || quantity <= 0) {
+   135→      ScaffoldMessenger.of(context).showSnackBar(
+   136→        const SnackBar(
+   137→          content: Text('Veuillez entrer une quantité valide'),
+   138→          backgroundColor: Colors.red,
+   139→          behavior: SnackBarBehavior.floating,
+   140→        ),
+   141→      );
+   142→      return;
+   143→    }
+   144→
+   145→    double? price = double.tryParse(_priceController.text.trim());
+   146→    if (price == null || price <= 0) {
+   147→      price = 1.0;
+   148→      _priceController.text = '1';
+   149→    }
+   150→
+   151→    if (_selectedProduct == null) {
+   152→      ScaffoldMessenger.of(context).showSnackBar(
+   153→        const SnackBar(
+   154→          content: Text('Veuillez sélectionner un produit'),
+   155→          backgroundColor: Colors.orange,
+   156→        ),
+   157→      );
+   158→      return;
+   159→    }
+   160→
+   161→    final productName = _selectedProduct!.name;
+   162→    final item = InvoiceItem(
+   163→      name: productName,
+   164→      quantity: quantity,
+   165→      unitPrice: price,
+   166→    );
+   167→
+   168→    setState(() {
+   169→      _items.add(item);
+   170→      _quantityController.clear();
+   171→      _priceController.clear();
+   172→      _selectedProduct = null;
+   173→      _isAddingItem = false;
+   174→    });
+   175→
+   176→    _historyService.saveProductName(productName);
+   177→    _saveDraft();
+   178→  }
+   179→
+   180→  void _editItem(int index) {
+   181→    showDialog(
+   182→      context: context,
+   183→      builder: (_) => _ItemEditDialog(
+   184→        item: _items[index],
+   185→        onSave: (updated) {
+   186→          setState(() => _items[index] = updated);
+   187→          _saveDraft();
+   188→        },
+   189→      ),
+   190→    );
+   191→  }
+   192→
+   193→  void _deleteItem(int index) {
+   194→    setState(() => _items.removeAt(index));
+   195→    _saveDraft();
+   196→  }
+   197→
+   198→  double _calculateTotal() => _items.fold(0.0, (sum, item) => sum + item.subtotal);
+   199→
+   200→  Future<void> _finalizeInvoice() async {
+   201→    if (_items.isEmpty) {
+   202→      ScaffoldMessenger.of(context).showSnackBar(
+   203→        const SnackBar(
+   204→          content: Text('Ajoutez au moins un article avant de finaliser'),
+   205→          backgroundColor: Colors.orange,
+   206→          behavior: SnackBarBehavior.floating,
+   207→        ),
+   208→      );
+   209→      return;
+   210→    }
+   211→
+   212→    setState(() => _isLoading = true);
+   213→
+   214→    final clientName = _clientNameController.text.trim().isEmpty
+   215→        ? 'Client inconnu'
+   216→        : _clientNameController.text.trim();
+   217→
+   218→    final invoice = Invoice(
+   219→      id: DateTime.now().millisecondsSinceEpoch.toString(),
+   220→      clientName: clientName,
+   221→      createdAt: DateTime.now(),
+   222→      items: List.from(_items),
+   223→    );
+   224→
+   225→    try {
+   226→      await _storageService.addInvoice(invoice);
+   227→      if (clientName != 'Client inconnu') {
+   228→        await _historyService.saveClientName(clientName);
+   229→      }
+   230→      await _storageService.clearDraft();
+   231→
+   232→      if (!mounted) return;
+   233→
+   234→      setState(() {
+   235→        _clientNameController.clear();
+   236→        _items.clear();
+   237→        _isAddingItem = false;
+   238→        _isLoading = false;
+   239→      });
+   240→
+   241→      ScaffoldMessenger.of(context).showSnackBar(
+   242→        const SnackBar(
+   243→          content: Text('Facture enregistrée avec succès !'),
+   244→          backgroundColor: Colors.green,
+   245→          behavior: SnackBarBehavior.floating,
+   246→        ),
+   247→      );
+   248→      widget.onInvoiceCreated();
+   249→    } catch (e) {
+   250→      if (!mounted) return;
+   251→      setState(() => _isLoading = false);
+   252→      ScaffoldMessenger.of(context).showSnackBar(
+   253→        SnackBar(
+   254→          content: Text('Erreur lors de la sauvegarde: $e'),
+   255→          backgroundColor: Colors.red,
+   256→          behavior: SnackBarBehavior.floating,
+   257→        ),
+   258→      );
+   259→    }
+   260→  }
+   261→
+   262→  void _openProductGrid() {
+   263→    showModalBottomSheet(
+   264→      context: context,
+   265→      isScrollControlled: true,
+   266→      backgroundColor: Colors.transparent,
+   267→      builder: (ctx) => ProductGridSheet(
+   268→        onProductSelected: _onProductSelected,
+   269→      ),
+   270→    );
+   271→  }
+   272→
+   273→  void _onProductSelected(Product product) {
+   274→    setState(() {
+   275→      final isSameProduct = _selectedProduct?.id == product.id;
+   276→      _selectedProduct = product;
+   277→      if (!isSameProduct) {
+   278→        // Pré-remplit le prix avec le dernier prix vendu à ce client
+   279→        final lastPrice = _clientPrices[product.name.trim().toLowerCase()];
+   280→        if (lastPrice != null) {
+   281→          _priceController.text = _priceInputValue(lastPrice);
+   282→        } else {
+   283→          _priceController.clear();
+   284→        }
+   285→      }
+   286→    });
+   287→  }
+   288→
+   289→  String _priceInputValue(double value) {
+   290→    return value % 1 == 0 ? value.toInt().toString() : value.toString();
+   291→  }
+   292→
+   293→  @override
+   294→  Widget build(BuildContext context) {
+   295→    return Scaffold(
+   296→      backgroundColor: const Color(0xFFF8FAFC),
+   297→      appBar: AppBar(
+   298→        title: const Text('Nouvelle Facture'),
+   299→        elevation: 0,
+   300→        backgroundColor: Colors.white,
+   301→        foregroundColor: const Color(0xFF1E293B),
+   302→        shape: const Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
+   303→        actions: [
+   304→          IconButton(
+   305→            icon: const Icon(Icons.delete_sweep),
+   306→            tooltip: 'Effacer le brouillon',
+   307→            onPressed: () async {
+   308→              await _storageService.clearDraft();
+   309→              if (!context.mounted) return;
+   310→              setState(() {
+   311→                _clientNameController.clear();
+   312→                _items.clear();
+   313→                _isAddingItem = false;
+   314→              });
+   315→              ScaffoldMessenger.of(context).showSnackBar(
+   316→                const SnackBar(
+   317→                  content: Text('Brouillon effacé'),
+   318→                  behavior: SnackBarBehavior.floating,
+   319→                ),
+   320→              );
+   321→            },
+   322→          ),
+   323→        ],
+   324→      ),
+   325→      body: GestureDetector(
+   326→        onTap: () {
+   327→          FocusScope.of(context).unfocus();
+   328→          setState(() => _showClientSuggestions = false);
+   329→        },
+   330→        child: Column(
+   331→          children: [
+   332→            Container(
+   333→              color: Colors.white,
+   334→              padding: const EdgeInsets.all(16),
+   335→              child: Column(
+   336→                crossAxisAlignment: CrossAxisAlignment.start,
+   337→                children: [
+   338→                  TextField(
+   339→                    controller: _clientNameController,
+   340→                    focusNode: _clientFocusNode,
+   341→                    decoration: InputDecoration(
+   342→                      labelText: 'Nom du client (optionnel)',
+   343→                      prefixIcon: Icon(Icons.person, color: Colors.blue[700]),
+   344→                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(Constants.inputRadius)),
+   345→                      filled: true,
+   346→                      fillColor: Colors.grey[50],
+   347→                    ),
+   348→                  ),
+   349→                  if (_showClientSuggestions && _clientSuggestions.isNotEmpty)
+   350→                    _buildSuggestions(
+   351→                      _clientSuggestions,
+   352→                      onSelect: (s) {
+   353→                        _clientNameController.text = s;
+   354→                        setState(() => _showClientSuggestions = false);
+   355→                      },
+   356→                    ),
+   357→                ],
+   358→              ),
+   359→            ),
+   360→            const Divider(height: 1),
+   361→            Expanded(
+   362→              child: _items.isEmpty
+   363→                  ? _buildEmptyState()
+   364→                  : ListView.builder(
+   365→                      padding: const EdgeInsets.all(16),
+   366→                      itemCount: _items.length,
+   367→                      itemBuilder: (context, index) {
+   368→                        final item = _items[index];
+   369→                        return Dismissible(
+   370→                          key: Key('item_$index'),
+   371→                          direction: DismissDirection.endToStart,
+   372→                          background: Container(
+   373→                            alignment: Alignment.centerRight,
+   374→                            padding: const EdgeInsets.only(right: 20),
+   375→                            color: Colors.red,
+   376→                            child: const Icon(Icons.delete, color: Colors.white),
+   377→                          ),
+   378→                          onDismissed: (_) => _deleteItem(index),
+   379→                          child: _buildItemCard(item, index),
+   380→                        );
+   381→                      },
+   382→                    ),
+   383→            ),
+   384→            if (_isAddingItem) _buildAddItemPanel(),
+   385→            _buildBottomBar(),
+   386→          ],
+   387→        ),
+   388→      ),
+   389→      floatingActionButton: _isAddingItem || _items.isNotEmpty
+   390→          ? null
+   391→          : FloatingActionButton.extended(
+   392→              onPressed: () => setState(() => _isAddingItem = true),
+   393→              icon: const Icon(Icons.add),
+   394→              label: const Text('Ajouter un article'),
+   395→              backgroundColor: const Color(0xFF2563EB),
+   396→            ),
+   397→      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
+   398→    );
+   399→  }
+   400→
+   401→  Widget _buildEmptyState() {
+   402→    return Center(
+   403→      child: Column(
+   404→        mainAxisAlignment: MainAxisAlignment.center,
+   405→        children: [
+   406→          Icon(Icons.shopping_cart_outlined, size: 80, color: Colors.grey[300]),
+   407→          const SizedBox(height: 16),
+   408→          Text('Aucun article',
+   409→              style: TextStyle(fontSize: 18, color: Colors.grey[600], fontWeight: FontWeight.w500)),
+   410→          const SizedBox(height: 8),
+   411→          Text('Appuyez sur + pour ajouter un article',
+   412→              style: TextStyle(fontSize: 14, color: Colors.grey[500])),
+   413→        ],
+   414→      ),
+   415→    );
+   416→  }
+   417→
+   418→  Widget _buildItemCard(InvoiceItem item, int index) {
+   419→    return Card(
+   420→      margin: const EdgeInsets.only(bottom: 10),
+   421→      elevation: 2,
+   422→      shadowColor: Colors.blue.withOpacity(0.05),
+   423→      shape: RoundedRectangleBorder(
+   424→        borderRadius: BorderRadius.circular(Constants.cardRadius),
+   425→        side: BorderSide(color: Colors.grey.withAlpha(30)),
+   426→      ),
+   427→      child: Padding(
+   428→        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+   429→        child: Row(
+   430→          children: [
+   431→            Container(
+   432→              width: 44,
+   433→              height: 44,
+   434→              decoration: BoxDecoration(
+   435→                gradient: const LinearGradient(
+   436→                  colors: [Color(0xFF2563EB), Color(0xFF1E40AF)],
+   437→                ),
+   438→                borderRadius: BorderRadius.circular(10),
+   439→              ),
+   440→              child: const Icon(Icons.shopping_bag, color: Colors.white),
+   441→            ),
+   442→            const SizedBox(width: 12),
+   443→            Expanded(
+   444→              child: Column(
+   445→                crossAxisAlignment: CrossAxisAlignment.start,
+   446→                children: [
+   447→                  Text(
+   448→                    item.name,
+   449→                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF1E293B)),
+   450→                  ),
+   451→                  const SizedBox(height: 3),
+   452→                  Text(
+   453→                    '${item.quantity} × ${formatNumber(item.unitPrice)} FCFA',
+   454→                    style: const TextStyle(fontSize: 13, color: Color(0xFF64748B)),
+   455→                  ),
+   456→                  const SizedBox(height: 2),
+   457→                  Text(
+   458→                    'Sous-total : ${formatCurrency(item.subtotal)}',
+   459→                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF2563EB)),
+   460→                  ),
+   461→                ],
+   462→              ),
+   463→            ),
+   464→            IconButton(
+   465→              icon: Icon(Icons.edit, color: Colors.blue[700], size: 20),
+   466→              onPressed: () => _editItem(index),
+   467→              tooltip: 'Modifier',
+   468→            ),
+   469→          ],
+   470→        ),
+   471→      ),
+   472→    );
+   473→  }
+   474→
+   475→  Widget _buildAddItemPanel() {
+   476→    return Container(
+   477→      color: Colors.white,
+   478→      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+   479→      child: Column(
+   480→        crossAxisAlignment: CrossAxisAlignment.stretch,
+   481→        children: [
+   482→          Row(
+   483→            children: [
+   484→              const Icon(Icons.add_box_outlined, color: Color(0xFF2563EB), size: 20),
+   485→              const SizedBox(width: 8),
+   486→              const Text('Nouvel article', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+   487→              const Spacer(),
+   488→              IconButton(
+   489→                icon: const Icon(Icons.close, size: 20),
+   490→                onPressed: () {
+   491→                  setState(() {
+   492→                    _isAddingItem = false;
+   493→                    _quantityController.clear();
+   494→                    _priceController.clear();
+   495→                    _selectedProduct = null;
+   496→                  });
+   497→                },
+   498→              )
+   499→            ],
+   500→          ),
+   501→          const SizedBox(height: 12),
+   502→          GestureDetector(
+   503→            onTap: _openProductGrid,
+   504→            child: Container(
+   505→              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+   506→              decoration: BoxDecoration(
+   507→                color: const Color(0xFFF1F5F9),
+   508→                borderRadius: BorderRadius.circular(14),
+   509→                border: Border.all(color: const Color(0xFFE2E8F0)),
+   510→              ),
+   511→              child: Row(
+   512→                children: [
+   513→                  Icon(Icons.search, color: Colors.grey[600]),
+   514→                  const SizedBox(width: 12),
+   515→                  Expanded(
+   516→                    child: Text(
+   517→                      _selectedProduct?.name ?? 'Appuyez pour choisir un produit',
+   518→                      style: TextStyle(
+   519→                        fontSize: 15,
+   520→                        color: _selectedProduct != null ? Colors.black : Colors.grey[600],
+   521→                      ),
+   522→                    ),
+   523→                  ),
+   524→                  const Icon(Icons.arrow_drop_down, color: Colors.grey),
+   525→                ],
+   526→              ),
+   527→            ),
+   528→          ),
+   529→          const SizedBox(height: 12),
+   530→          Row(
+   531→            children: [
+   532→              Expanded(
+   533→                child: TextField(
+   534→                  controller: _quantityController,
+   535→                  keyboardType: TextInputType.number,
+   536→                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+   537→                  decoration: InputDecoration(
+   538→                    labelText: 'Quantité *',
+   539→                    prefixIcon: const Icon(Icons.numbers),
+   540→                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+   541→                  ),
+   542→                ),
+   543→              ),
+   544→              const SizedBox(width: 12),
+   545→              Expanded(
+   546→                child: TextField(
+   547→                  controller: _priceController,
+   548→                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+   549→                  inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*'))],
+   550→                  decoration: InputDecoration(
+   551→                    labelText: 'Prix unitaire (FCFA)',
+   552→                    prefixIcon: const Icon(Icons.attach_money),
+   553→                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+   554→                  ),
+   555→                ),
+   556→              ),
+   557→            ],
+   558→          ),
+   559→          LastPriceHint(
+   560→            lastPrice: _selectedProduct == null
+   561→                ? null
+   562→                : _clientPrices[_selectedProduct!.name.trim().toLowerCase()],
+   563→            clientName: _clientNameController.text,
+   564→          ),
+   565→          const SizedBox(height: 14),
+   566→          ElevatedButton.icon(
+   567→            onPressed: _addItem,
+   568→            icon: const Icon(Icons.check),
+   569→            label: const Text('Ajouter l\'article'),
+   570→            style: ElevatedButton.styleFrom(
+   571→              padding: const EdgeInsets.symmetric(vertical: 14),
+   572→              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+   573→            ),
+   574→          ),
+   575→        ],
+   576→      ),
+   577→    );
+   578→  }
+   579→
+   580→  Widget _buildSuggestions(List<String> items, {required void Function(String) onSelect}) {
+   581→    return Container(
+   582→      margin: const EdgeInsets.only(top: 6),
+   583→      decoration: BoxDecoration(
+   584→        color: Colors.white,
+   585→        border: Border.all(color: Colors.grey[200]!),
+   586→        borderRadius: BorderRadius.circular(14),
+   587→        boxShadow: [
+   588→          BoxShadow(
+   589→            color: Colors.black.withAlpha(15),
+   590→            blurRadius: 8,
+   591→            offset: const Offset(0, 2),
+   592→          ),
+   593→        ],
+   594→      ),
+   595→      constraints: const BoxConstraints(maxHeight: 140),
+   596→      child: ListView.separated(
+   597→        shrinkWrap: true,
+   598→        itemCount: items.length,
+   599→        separatorBuilder: (_, __) => Divider(height: 1, color: Colors.grey[100]),
+   600→        itemBuilder: (context, i) {
+   601→          return ListTile(
+   602→            dense: true,
+   603→            leading: Icon(Icons.history, size: 16, color: Colors.grey[400]),
+   604→            title: Text(items[i], style: const TextStyle(fontSize: 14)),
+   605→            onTap: () => onSelect(items[i]),
+   606→            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+   607→          );
+   608→        },
+   609→      ),
+   610→    );
+   611→  }
+   612→
+   613→  Widget _buildBottomBar() {
+   614→    return Container(
+   615→      color: Colors.white,
+   616→      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+   617→      child: Column(
+   618→        children: [
+   619→          if (_items.isNotEmpty) ...[
+   620→            Container(
+   621→              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+   622→              decoration: BoxDecoration(
+   623→                gradient: const LinearGradient(
+   624→                  colors: [Color(0xFF2563EB), Color(0xFF1E40AF)],
+   625→                ),
+   626→                borderRadius: BorderRadius.circular(14),
+   627→              ),
+   628→              child: Row(
+   629→                children: [
+   630→                  Expanded(
+   631→                    child: Column(
+   632→                      crossAxisAlignment: CrossAxisAlignment.start,
+   633→                      children: [
+   634→                        const Text(
+   635→                          'Total à payer',
+   636→                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Colors.white70),
+   637→                        ),
+   638→                        const SizedBox(height: 4),
+   639→                        Text(
+   640→                          formatCurrency(_calculateTotal()),
+   641→                          style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white),
+   642→                        ),
+   643→                      ],
+   644→                    ),
+   645→                  ),
+   646→                  Text(
+   647→                    '${_items.length} article${_items.length > 1 ? 's' : ''}',
+   648→                    style: const TextStyle(color: Colors.white70, fontSize: 13),
+   649→                  ),
+   650→                ],
+   651→              ),
+   652→            ),
+   653→            const SizedBox(height: 12),
+   654→          ],
+   655→          if (!_isAddingItem && _items.isNotEmpty)
+   656→            Row(
+   657→              children: [
+   658→                Expanded(
+   659→                  child: OutlinedButton.icon(
+   660→                    onPressed: () => setState(() => _isAddingItem = true),
+   661→                    icon: const Icon(Icons.add, color: Color(0xFF2563EB)),
+   662→                    label: const Text('Ajouter', style: TextStyle(color: Color(0xFF2563EB))),
+   663→                    style: OutlinedButton.styleFrom(
+   664→                      padding: const EdgeInsets.symmetric(vertical: 14),
+   665→                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+   666→                      side: const BorderSide(color: Color(0xFF2563EB)),
+   667→                    ),
+   668→                  ),
+   669→                ),
+   670→                const SizedBox(width: 12),
+   671→                Expanded(
+   672→                  child: ElevatedButton.icon(
+   673→                    onPressed: _isLoading ? null : _finalizeInvoice,
+   674→                    icon: _isLoading
+   675→                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+   676→                        : const Icon(Icons.check_circle),
+   677→                    label: Text(_isLoading ? 'Enregistrement...' : 'Finaliser'),
+   678→                    style: ElevatedButton.styleFrom(
+   679→                      padding: const EdgeInsets.symmetric(vertical: 14),
+   680→                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+   681→                      backgroundColor: const Color(0xFF16A34A),
+   682→                      foregroundColor: Colors.white,
+   683→                    ),
+   684→                  ),
+   685→                ),
+   686→              ],
+   687→            ),
+   688→        ],
+   689→      ),
+   690→    );
+   691→  }
+   692→}
+   693→
+   694→class _ItemEditDialog extends StatefulWidget {
+   695→  final InvoiceItem item;
+   696→  final Function(InvoiceItem) onSave;
+   697→
+   698→  const _ItemEditDialog({required this.item, required this.onSave});
+   699→
+   700→  @override
+   701→  State<_ItemEditDialog> createState() => _ItemEditDialogState();
+   702→}
+   703→
+   704→class _ItemEditDialogState extends State<_ItemEditDialog> {
+   705→  late TextEditingController _nameController;
+   706→  late TextEditingController _quantityController;
+   707→  late TextEditingController _priceController;
+   708→
+   709→  @override
+   710→  void initState() {
+   711→    super.initState();
+   712→    _nameController = TextEditingController(text: widget.item.name);
+   713→    _quantityController = TextEditingController(text: widget.item.quantity.toString());
+   714→    _priceController = TextEditingController(text: widget.item.unitPrice.toString());
+   715→  }
+   716→
+   717→  @override
+   718→  void dispose() {
+   719→    _nameController.dispose();
+   720→    _quantityController.dispose();
+   721→    _priceController.dispose();
+   722→    super.dispose();
+   723→  }
+   724→
+   725→  void _save() {
+   726→    final quantity = int.tryParse(_quantityController.text);
+   727→    final price = double.tryParse(_priceController.text);
+   728→    if (quantity == null || quantity <= 0 || price == null || price <= 0) {
+   729→      ScaffoldMessenger.of(context).showSnackBar(
+   730→        const SnackBar(content: Text('Valeurs invalides'), backgroundColor: Colors.red),
+   731→      );
+   732→      return;
+   733→    }
+   734→    final updated = widget.item.copyWith(
+   735→      name: _nameController.text.trim().isEmpty ? 'Sans nom' : _nameController.text.trim(),
+   736→      quantity: quantity,
+   737→      unitPrice: price,
+   738→    );
+   739→    widget.onSave(updated);
+   740→    Navigator.pop(context);
+   741→  }
+   742→
+   743→  @override
+   744→  Widget build(BuildContext context) {
+   745→    return AlertDialog(
+   746→      title: const Text('Modifier l\'article'),
+   747→      content: Column(
+   748→        mainAxisSize: MainAxisSize.min,
+   749→        children: [
+   750→          TextField(
+   751→            controller: _nameController,
+   752→            decoration: InputDecoration(
+   753→              labelText: 'Nom',
+   754→              border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+   755→            ),
+   756→          ),
+   757→          const SizedBox(height: 12),
+   758→          Row(
+   759→            children: [
+   760→              Expanded(
+   761→                child: TextField(
+   762→                  controller: _quantityController,
+   763→                  keyboardType: TextInputType.number,
+   764→                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+   765→                  decoration: InputDecoration(
+   766→                    labelText: 'Quantité',
+   767→                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+   768→                  ),
+   769→                ),
+   770→              ),
+   771→              const SizedBox(width: 12),
+   772→              Expanded(
+   773→                child: TextField(
+   774→                  controller: _priceController,
+   775→                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+   776→                  inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*'))],
+   777→                  decoration: InputDecoration(
+   778→                    labelText: 'Prix unitaire',
+   779→                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+   780→                  ),
+   781→                ),
+   782→              ),
+   783→            ],
+   784→          ),
+   785→        ],
+   786→      ),
+   787→      actions: [
+   788→        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Annuler')),
+   789→        ElevatedButton(onPressed: _save, child: const Text('Enregistrer')),
+   790→      ],
+   791→    );
+   792→  }
+   793→}
