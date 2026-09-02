@@ -7,7 +7,7 @@ Application web professionnelle (PWA installable, fonctionnant hors ligne) repro
 - **Authentification** par numéro de téléphone sénégalais (+221) + mot de passe
 - **Rôles** : client (accès limité), employé (factures/clients/produits), admin (accès total + maintenance + gestion des comptes)
 - **Factures** : création, modification, duplication, changement de statut, archivage, suppression
-- **Calculs fidèles** : sous-total, remise, TVA, total à payer (identiques à `invoice.dart`)
+- **Calculs fidèles** : sous-total et total à payer sans TVA ni remise
 - **Statuts** : En cours (#6B4C4C), En livraison (#FFC107), Livrée (#4CAF50), Archivée (#9E9E9E)
 - **Clients & Produits** : gestion complète avec catégories et images
 - **Statistiques** : chiffre d'affaires, KPIs, graphiques (bar + donut), top 5 clients/produits
@@ -27,7 +27,7 @@ Application web professionnelle (PWA installable, fonctionnant hors ligne) repro
 | Framework | Next.js 16 (App Router) |
 | Langage | TypeScript 5 |
 | UI | Tailwind CSS 4 + shadcn/ui + Lucide icons |
-| Base de données | Prisma ORM + SQLite |
+| Base de données | Prisma ORM + PostgreSQL (Supabase) |
 | Auth | JWT (jose) + bcryptjs, cookies HTTP-only |
 | Stockage hors ligne | IndexedDB via Dexie.js |
 | Parsing CSV | PapaParse |
@@ -36,7 +36,7 @@ Application web professionnelle (PWA installable, fonctionnant hors ligne) repro
 | Graphiques | Recharts |
 | PWA | manifest.json + Service Worker |
 
-> **Note sur Supabase** : Le cahier des charges demandait Supabase. L'environnement de développement fourni utilise Prisma + SQLite. L'architecture est conçue pour être portable vers Supabase : les politiques RLS équivalentes sont implémentées côté serveur dans les API routes (`requireAuth`, `requireRole`), et le schéma Prisma est directement transposable en schéma Supabase. La couche offline (Dexie + sync queue) est identique quelle que soit la base de données distante.
+> **Note sur Supabase** : Prisma utilise la base PostgreSQL Supabase. La couche offline (Dexie + sync queue) est identique quelle que soit la base de données distante.
 
 ## Démarrage rapide
 
@@ -51,15 +51,19 @@ bun install
 Créer un fichier `.env` à la racine :
 
 ```env
-DATABASE_URL="file:./db/custom.db"
+DATABASE_URL="postgresql://postgres.<PROJECT_REF>:<MOT_DE_PASSE>@<POOLER_HOST>:6543/postgres?pgbouncer=true"
+DIRECT_URL="postgresql://postgres.<PROJECT_REF>:<MOT_DE_PASSE>@<DIRECT_HOST>:5432/postgres"
 JWT_SECRET="votre-secret-jwt-tres-long-et-aleatoire"
 ```
+
+Copier les deux URLs depuis le tableau de bord Supabase. Ne jamais commiter `.env` ni le mot de passe réel.
 
 ### 3. Base de données
 
 ```bash
-bun run db:push    # Crée les tables
-bun run db:generate # Génère le client Prisma
+npx prisma generate
+npx prisma db push    # Crée les tables sur Supabase
+npx prisma db execute --file prisma/rls.sql --schema prisma/schema.prisma
 ```
 
 ### 4. Créer le premier compte admin
@@ -82,23 +86,6 @@ curl -X POST http://localhost:3000/api/seed \
 
 > ⚠️ Cette route est désactivée dès qu'un compte admin existe. Elle refuse de s'exécuter en production si un admin est déjà présent.
 
-**Option C — Modification manuelle en base (équivalent Supabase)**
-
-```sql
--- Via un client SQLite ou Supabase SQL Editor
-INSERT INTO User (id, phone, passwordHash, role, name, disabled, createdAt, updatedAt)
-VALUES (
-  lower(hex(randomblob(8))),
-  '+221770000000',
-  '$2a$10$...',  -- hash bcrypt du mot de passe
-  'admin',
-  'Administrateur',
-  0,
-  datetime('now'),
-  datetime('now')
-);
-```
-
 > **Sécurité** : Aucune action dans l'interface ne permet de devenir admin. Le rôle n'est assignable que par modification directe de la base ou par un admin existant via l'écran Comptes. Les nouveaux comptes créés via inscription ont toujours le rôle `client`.
 
 ### 5. Lancement
@@ -111,7 +98,7 @@ L'application est disponible sur `http://localhost:3000`.
 
 ## Sécurité — RLS équivalent
 
-Chaque route API vérifie l'authentification et le rôle côté serveur (jamais côté client). Le rôle est toujours relu depuis la base de données (source de vérité), jamais depuis le JWT seul.
+Chaque route API vérifie l'authentification et le rôle côté serveur (jamais côté client). Le rôle est toujours relu depuis la base de données (source de vérité), jamais depuis le JWT seul. En complément, `prisma/rls.sql` active RLS et bloque les rôles `anon` et `authenticated` de la Data API Supabase. RLS est une défense en profondeur, pas le mécanisme principal : l'autorité reste dans les routes Next.js via `requireAuth` et `requireRole`.
 
 ### Tableau récapitulatif des routes API et rôles minimum
 
@@ -223,7 +210,7 @@ src/
 Reproduit fidèlement `lib/models/invoice.dart` et `lib/models/product.dart` :
 
 - **User** : id, phone (+221), passwordHash, role (client/employee/admin), name, disabled
-- **Invoice** : id, clientName, clientId, status (enCours/enLivraison/livree/archivee), notes, discount, taxRate, createdBy, createdAt, updatedAt
+- **Invoice** : id, clientName, clientId, status (enCours/enLivraison/livree/archivee), notes, createdBy, createdAt, updatedAt
 - **InvoiceItem** : id, invoiceId, name, quantity, unitPrice
 - **Client** : id, name, phone, address, createdBy
 - **Product** : id, name, category, imageUrl, createdBy
@@ -234,8 +221,7 @@ Reproduit fidèlement `lib/models/invoice.dart` et `lib/models/product.dart` :
 ```
 subtotal_ligne   = quantity × unit_price
 total_facture    = Σ subtotals
-tax_amount       = (total − discount) × tax_rate / 100
-payable_total    = total − discount + tax_amount
+payable_total    = total
 ```
 
 ## Format CSV
@@ -254,8 +240,10 @@ L'import supporte le mapping automatique des colonnes et le choix entre "Remplac
 1. Pousser le code sur GitHub
 2. Importer le dépôt sur [vercel.com](https://vercel.com)
 3. Configurer les variables d'environnement :
-   - `DATABASE_URL` — pour SQLite, utiliser un chemin persistant ; pour Supabase/Postgres, utiliser l'URL de connexion
+  - `DATABASE_URL` — URL poolée Supabase (port 6543, `pgbouncer=true`)
+  - `DIRECT_URL` — URL directe Supabase (port 5432), utilisée par Prisma pour les opérations d'administration
    - `JWT_SECRET` — une chaîne aléatoire de 64+ caractères
+  - Ne jamais commiter `.env`, qui contient le mot de passe réel
 4. Déployer
 5. Créer le premier admin via l'API `/api/seed` (voir ci-dessus)
 

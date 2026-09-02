@@ -83,20 +83,16 @@ async function main() {
     const dayOffset = Math.floor(i / 3);
     const createdAt = new Date(now - dayOffset * 86400000 - (i % 24) * 3600000);
     const itemCount = 1 + (i % 3);
-    const chosen = [];
+    const chosen: { name: string; quantity: number; unitPrice: number }[] = [];
     for (let j = 0; j < itemCount; j++) {
       const base = itemsPool[(i + j) % itemsPool.length];
       chosen.push({ name: base[0], quantity: base[1], unitPrice: base[2] });
     }
-    const discount = i % 5 === 0 ? 2000 : 0;
-    const taxRate = i % 4 === 0 ? 18 : 0;
     const inv = await db.invoice.create({
       data: {
         clientName,
         status,
         notes: i % 6 === 0 ? "Livraison express" : null,
-        discount,
-        taxRate,
         createdBy: admin.id,
         createdAt,
         updatedAt: createdAt,

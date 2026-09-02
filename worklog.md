@@ -2,7 +2,7 @@
 
 ## Project Status
 Building a PWA reproducing the Flutter invoice_app as a professional web app.
-Environment: Next.js 16 + Prisma/SQLite (adapted from Supabase requirement) + Dexie.js offline store.
+Environment: Next.js 16 + Prisma/PostgreSQL (Supabase) + Dexie.js offline store.
 
 ## Completed (Phase 1-4)
 - **Foundation**: Prisma schema (User, Invoice, InvoiceItem, Client, Product, Settings), auth lib (JWT+bcrypt), API routes (auth, invoices, clients, products, settings, users, upload, maintenance, seed)
@@ -301,7 +301,7 @@ Task: QA + bug fixes + new features (Dashboard, skeleton loaders, keyboard short
 
 ## Unresolved issues / risks
 - **Dev server sandbox instability**: the `bun run dev` process dies after the first compile cycle in this environment, making sustained agent-browser testing unreliable. Mitigation: verified via curl (all 8 endpoints 200) + lint clean. The app works when accessed immediately after a fresh server start.
-- **No real Supabase**: per environment constraints, uses Prisma+SQLite. Architecture is portable (documented in README).
+- **Supabase PostgreSQL**: Prisma uses the pooler URL for the application and the direct URL for schema administration; RLS is configured as defense in depth.
 
 ## Priority recommendations for next phase
 1. **Clients management screen** — currently clients are only created implicitly when invoicing; a dedicated screen to view/edit/delete clients (with their invoice history) would match the Flutter app's settings "Clients" tab
