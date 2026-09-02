@@ -58,6 +58,12 @@ JWT_SECRET="votre-secret-jwt-tres-long-et-aleatoire"
 
 Copier les deux URLs depuis le tableau de bord Supabase. Ne jamais commiter `.env` ni le mot de passe réel.
 
+Le fichier `.env` est déjà exclu du dépôt par `.gitignore`. Pour vérifier qu'il est bien ignoré :
+
+```bash
+git check-ignore -v .env
+```
+
 ### 3. Base de données
 
 ```bash
@@ -72,6 +78,18 @@ npx prisma db execute --file prisma/rls.sql --schema prisma/schema.prisma
 
 ```bash
 bun scripts/seed.ts
+```
+
+Si la commande `bun` n'est pas reconnue sous Windows, redémarrer le terminal après l'installation. Il est aussi possible de vérifier directement l'installation avec :
+
+```powershell
+& "$env:USERPROFILE\.bun\bin\bun.exe" --version
+```
+
+Alternative sans Bun :
+
+```bash
+npx --yes tsx scripts/seed.ts
 ```
 
 Crée un admin (`+221770000000` / `admin1234`), un employé (`+221771111111` / `employe1234`), et des données de démonstration (produits, clients, 24 factures).
@@ -237,17 +255,22 @@ L'import supporte le mapping automatique des colonnes et le choix entre "Remplac
 
 ## Déploiement sur Vercel
 
-1. Pousser le code sur GitHub
-2. Importer le dépôt sur [vercel.com](https://vercel.com)
-3. Configurer les variables d'environnement :
-  - `DATABASE_URL` — URL poolée Supabase (port 6543, `pgbouncer=true`)
-  - `DIRECT_URL` — URL directe Supabase (port 5432), utilisée par Prisma pour les opérations d'administration
-   - `JWT_SECRET` — une chaîne aléatoire de 64+ caractères
-  - Ne jamais commiter `.env`, qui contient le mot de passe réel
-4. Déployer
-5. Créer le premier admin via l'API `/api/seed` (voir ci-dessus)
+1. Pousser le code sur GitHub. Le fichier `.env` reste local et n'est pas versionné.
+2. Importer le dépôt sur [vercel.com](https://vercel.com).
+3. Configurer les variables d'environnement Vercel :
+   - `DATABASE_URL` : URL poolée Supabase, port `6543`, avec `pgbouncer=true`.
+   - `DIRECT_URL` : URL directe Supabase, port `5432`, utilisée par Prisma.
+   - `JWT_SECRET` : chaîne aléatoire d'au moins 64 caractères.
+4. Déployer l'application.
+5. Appliquer le schéma et RLS depuis un environnement disposant des URLs Supabase :
 
-> **Migration vers Supabase** : remplacer `prisma/schema.prisma` (datasource → postgresql), créer les mêmes tables dans Supabase, ajouter les politiques RLS PostgreSQL équivalentes aux vérifications `requireAuth/requireRole`, puis remplacer `src/lib/db.ts` par le client Supabase. La couche frontend et offline reste inchangée.
+```bash
+npx prisma generate
+npx prisma db push
+npx prisma db execute --file prisma/rls.sql --schema prisma/schema.prisma
+```
+
+6. Créer le premier admin avec `bun scripts/seed.ts` ou `npx --yes tsx scripts/seed.ts`.
 
 ## Installation PWA
 
