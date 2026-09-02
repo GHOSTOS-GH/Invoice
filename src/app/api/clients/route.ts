@@ -9,10 +9,7 @@ export async function GET() {
   try {
     const user = await requireAuth();
     if (user.role === "client") return Response.json([]);
-    const clients = await db.client.findMany({
-      where: { createdBy: user.id },
-      orderBy: { name: "asc" },
-    });
+    const clients = await db.client.findMany({ orderBy: { name: "asc" } });
     return Response.json(clients);
   } catch (err) {
     return authErrorResponse(err);

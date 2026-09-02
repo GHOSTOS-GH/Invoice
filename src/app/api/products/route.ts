@@ -11,10 +11,7 @@ export async function GET() {
   try {
     const user = await requireAuth();
     if (user.role === "client") return Response.json([]);
-    const products = await db.product.findMany({
-      where: { createdBy: user.id },
-      orderBy: { name: "asc" },
-    });
+    const products = await db.product.findMany({ orderBy: { name: "asc" } });
     return Response.json(products);
   } catch (err) {
     return authErrorResponse(err);

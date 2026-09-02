@@ -3,7 +3,7 @@
 // DELETE /api/invoices/[id] — delete invoice + items
 import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
-import { requireAuth, authErrorResponse } from "@/lib/auth";
+import { requireRole, authErrorResponse } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
@@ -12,16 +12,13 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const user = await requireAuth();
-    if (user.role === "client") {
-      return Response.json({ error: "Accès refusé" }, { status: 403 });
-    }
+    await requireRole("employee");
     const { id } = await params;
     const invoice = await db.invoice.findUnique({
       where: { id },
       include: { items: true },
     });
-    if (!invoice || invoice.createdBy !== user.id) {
+    if (!invoice) {
       return Response.json({ error: "Facture introuvable" }, { status: 404 });
     }
     return Response.json(invoice);
@@ -35,10 +32,7 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const user = await requireAuth();
-    if (user.role === "client") {
-      return Response.json({ error: "Accès refusé" }, { status: 403 });
-    }
+    const user = await requireRole("employee");
     const { id } = await params;
     const body = await req.json();
     const { clientName, clientId, status, notes, items, createdAt } = body;
@@ -48,12 +42,13 @@ export async function PUT(
       // Delete existing items first (for updates)
       await tx.invoiceItem.deleteMany({ where: { invoiceId: id } });
 
+      const existing = await tx.invoice.findUnique({ where: { id }, select: { createdBy: true } });
       const data: any = {
         clientName: String(clientName || "").trim(),
         clientId: clientId || null,
         status: status || "enCours",
         notes: notes ?? null,
-        createdBy: user.id,
+        createdBy: existing?.createdBy ?? user.id,
         updatedAt: new Date(),
       };
       if (createdAt) data.createdAt = new Date(createdAt);
@@ -90,13 +85,10 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const user = await requireAuth();
-    if (user.role === "client") {
-      return Response.json({ error: "Accès refusé" }, { status: 403 });
-    }
+    await requireRole("employee");
     const { id } = await params;
     const existing = await db.invoice.findUnique({ where: { id } });
-    if (!existing || existing.createdBy !== user.id) {
+    if (!existing) {
       return Response.json({ error: "Facture introuvable" }, { status: 404 });
     }
     await db.invoice.delete({ where: { id } });

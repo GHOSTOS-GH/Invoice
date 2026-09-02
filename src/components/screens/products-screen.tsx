@@ -59,6 +59,7 @@ import {
   FileText,
   FileSpreadsheet,
 } from "lucide-react";
+import Image from "next/image";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -283,9 +284,11 @@ function ProductFormDialog({
           <div className="flex flex-col items-center gap-2">
             <div className="relative w-full aspect-square max-w-[180px] rounded-2xl bg-slate-100 border border-slate-200 overflow-hidden flex items-center justify-center">
               {preview ? (
-                <img
+                <Image
                   src={preview}
                   alt="Aperçu du produit"
+                  fill
+                  sizes="180px"
                   className="w-full h-full object-cover"
                 />
               ) : (
@@ -744,10 +747,11 @@ function ProductCard({
     <div className="group bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden hover:shadow-md hover:border-slate-300 transition-all flex flex-col">
       <div className="aspect-square bg-slate-100 relative">
         {product.imageUrl ? (
-          <img
+          <Image
             src={product.imageUrl}
             alt={product.name}
-            loading="lazy"
+            fill
+            sizes="(max-width: 640px) 50vw, 240px"
             className="w-full h-full object-cover"
           />
         ) : (

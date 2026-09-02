@@ -190,11 +190,17 @@ export function AppShell({
           <div className="bg-gradient-to-r from-purple-600 via-purple-700 to-indigo-700 text-white text-[11px] font-bold tracking-wider px-4 py-1.5 flex items-center justify-center gap-2 uppercase">
             <ShieldCheck className="w-3.5 h-3.5" />
             Mode Administrateur — Accès total
+            <button onClick={logout} aria-label="Se déconnecter" className="md:hidden ml-2 p-1 rounded hover:bg-white/20">
+              <LogOut className="w-4 h-4" />
+            </button>
           </div>
         ) : (
           <div className="bg-emerald-600 text-white text-[11px] font-bold tracking-wider px-4 py-1.5 flex items-center justify-center gap-2 uppercase">
             <Briefcase className="w-3.5 h-3.5" />
             Mode Employé — Factures & Clients
+            <button onClick={logout} aria-label="Se déconnecter" className="md:hidden ml-2 p-1 rounded hover:bg-white/20">
+              <LogOut className="w-4 h-4" />
+            </button>
           </div>
         )}
         <div className="flex flex-1">

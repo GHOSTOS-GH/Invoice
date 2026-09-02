@@ -14,7 +14,7 @@ export async function PUT(
     const { id } = await params;
     const body = await req.json();
     const existing = await db.product.findUnique({ where: { id } });
-    if (!existing || existing.createdBy !== user.id) {
+    if (!existing) {
       return Response.json({ error: "Produit introuvable" }, { status: 404 });
     }
     const updated = await db.product.update({
@@ -40,7 +40,7 @@ export async function DELETE(
     const user = await requireRole("admin");
     const { id } = await params;
     const existing = await db.product.findUnique({ where: { id } });
-    if (!existing || existing.createdBy !== user.id) {
+    if (!existing) {
       return Response.json({ error: "Produit introuvable" }, { status: 404 });
     }
     await db.product.delete({ where: { id } });

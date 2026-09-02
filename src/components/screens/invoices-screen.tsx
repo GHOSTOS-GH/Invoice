@@ -2,7 +2,7 @@
 // Invoices list — reproduces history_screen.dart:
 // search, status filters, sort, multi-select, CSV export, bulk delete.
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useRef } from "react";
 import { useInvoices, deleteInvoice, saveInvoice } from "@/lib/data-hooks";
 import { useNav } from "@/components/app-shell";
 import {
@@ -541,6 +541,17 @@ export function InvoicesScreen() {
                 selected={selected.has(inv.id)}
                 onToggleSelect={() => toggleSelect(inv.id)}
                 onOpen={() => navigate("invoice-detail", { invoiceId: inv.id })}
+                onDelete={async () => {
+                  if (!window.confirm("Supprimer cette facture définitivement ?")) return;
+                  await deleteInvoice(inv.id);
+                  toast.success("Facture supprimée");
+                  refresh();
+                }}
+                onStatus={async (nextStatus) => {
+                  await saveInvoice({ ...inv, status: nextStatus });
+                  toast.success(`Facture → ${INVOICE_STATUS_META[nextStatus].label}`);
+                  refresh();
+                }}
               />
             ))}
           </div>
@@ -577,66 +588,80 @@ function InvoiceCard({
   selected,
   onToggleSelect,
   onOpen,
+  onDelete,
+  onStatus,
 }: {
   invoice: Invoice;
   selectionMode: boolean;
   selected: boolean;
   onToggleSelect: () => void;
   onOpen: () => void;
+  onDelete: () => Promise<void>;
+  onStatus: (status: InvoiceStatus) => Promise<void>;
 }) {
+  const [swipe, setSwipe] = useState<"left" | "right" | null>(null);
+  const touchStart = useRef({ x: 0, y: 0 });
+  const tracking = useRef(false);
   const payable = invoicePayableTotal(invoice);
   const qty = invoiceTotalQuantity(invoice.items);
+
+  const handleTouchStart = (event: React.TouchEvent) => {
+    const touch = event.touches[0];
+    touchStart.current = { x: touch.clientX, y: touch.clientY };
+    tracking.current = true;
+  };
+  const handleTouchMove = (event: React.TouchEvent) => {
+    if (!tracking.current) return;
+    const touch = event.touches[0];
+    const dx = touch.clientX - touchStart.current.x;
+    const dy = touch.clientY - touchStart.current.y;
+    if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 10) event.preventDefault();
+  };
+  const handleTouchEnd = (event: React.TouchEvent) => {
+    if (!tracking.current) return;
+    tracking.current = false;
+    const touch = event.changedTouches[0];
+    const dx = touch.clientX - touchStart.current.x;
+    const dy = touch.clientY - touchStart.current.y;
+    if (Math.abs(dx) > 80 && Math.abs(dx) > Math.abs(dy) * 1.3) {
+      setSwipe(dx < 0 ? "left" : "right");
+    }
+  };
+
   return (
     <div
-      className={`group bg-white rounded-2xl border transition-all duration-200 ${
-        selected
-          ? "border-[#2563EB] ring-2 ring-[#2563EB]/20"
-          : "border-slate-200 hover:border-slate-300 hover:shadow-md hover:-translate-y-0.5"
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      className={`relative overflow-hidden rounded-2xl border touch-pan-y ${
+        selected ? "border-[#2563EB] ring-2 ring-[#2563EB]/20" : "border-slate-200"
       }`}
     >
-      <div className="flex items-stretch">
-        {selectionMode && (
-          <div className="flex items-center pl-3">
-            <Checkbox checked={selected} onCheckedChange={onToggleSelect} />
-          </div>
-        )}
-        <button
-          onClick={selectionMode ? onToggleSelect : onOpen}
-          className="flex-1 flex items-center gap-3 p-3.5 sm:p-4 text-left min-w-0"
-        >
-          {/* Left: status accent bar */}
-          <div
-            className="w-1 h-12 rounded-full shrink-0 transition-all group-hover:h-14"
-            style={{ backgroundColor: INVOICE_STATUS_META[invoice.status].color }}
-          />
-          {/* Middle: info */}
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-0.5">
-              <p className="font-bold text-slate-900 text-[15px] truncate">
-                {invoice.clientName}
-              </p>
-              <StatusBadge status={invoice.status} size="sm" />
+      <div className="absolute inset-0 flex items-stretch">
+        <div className="flex flex-1 items-center gap-2 bg-emerald-600 p-2">
+          {swipe === "right" && (
+            <>
+              <button onClick={() => onStatus("enLivraison")} className="h-full rounded-lg bg-white px-2 text-[11px] font-bold text-emerald-700">En livraison</button>
+              <button onClick={() => onStatus("livree")} className="h-full rounded-lg bg-white px-2 text-[11px] font-bold text-emerald-700">Livrée</button>
+            </>
+          )}
+        </div>
+        <div className="flex w-28 items-center justify-end bg-red-600 p-2">
+          {swipe === "left" && <button onClick={onDelete} className="h-full rounded-lg bg-white px-2 text-[11px] font-bold text-red-700">Supprimer</button>}
+        </div>
+      </div>
+      <div className={`relative z-10 bg-white transition-transform duration-200 ${swipe === "left" ? "-translate-x-28" : swipe === "right" ? "translate-x-28" : ""}`}>
+        <div className="flex items-stretch">
+          {selectionMode && <div className="flex items-center pl-3"><Checkbox checked={selected} onCheckedChange={onToggleSelect} /></div>}
+          <button onClick={selectionMode ? onToggleSelect : onOpen} className="flex-1 flex items-center gap-3 p-3.5 sm:p-4 text-left min-w-0">
+            <div className="w-1 h-12 rounded-full shrink-0" style={{ backgroundColor: INVOICE_STATUS_META[invoice.status].color }} />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 mb-0.5"><p className="font-bold text-slate-900 text-[15px] truncate">{invoice.clientName}</p><StatusBadge status={invoice.status} size="sm" /></div>
+              <div className="flex items-center gap-3 text-[12px] text-slate-400"><span className="font-mono">{refId(invoice.id)}</span><span>·</span><span>{formatDateTime(invoice.createdAt)}</span><span className="hidden sm:inline">·</span><span className="hidden sm:inline">{invoice.items.length} article{invoice.items.length > 1 ? "s" : ""} · {qty} unité{qty > 1 ? "s" : ""}</span></div>
             </div>
-            <div className="flex items-center gap-3 text-[12px] text-slate-400">
-              <span className="font-mono">{refId(invoice.id)}</span>
-              <span>·</span>
-              <span>{formatDateTime(invoice.createdAt)}</span>
-              <span className="hidden sm:inline">·</span>
-              <span className="hidden sm:inline">
-                {invoice.items.length} article{invoice.items.length > 1 ? "s" : ""} · {qty} unité{qty > 1 ? "s" : ""}
-              </span>
-            </div>
-          </div>
-          {/* Right: total */}
-          <div className="text-right shrink-0">
-            <p className="font-extrabold text-[#2563EB] text-[16px] leading-tight tabular-nums">
-              {formatCurrency(payable)}
-            </p>
-            <p className="text-[10px] text-slate-300">
-              {invoice.items.length} art. · {qty}u
-            </p>
-          </div>
-        </button>
+            <div className="text-right shrink-0"><p className="font-extrabold text-[#2563EB] text-[16px] leading-tight tabular-nums">{formatCurrency(payable)}</p><p className="text-[10px] text-slate-300">{invoice.items.length} art. · {qty}u</p></div>
+          </button>
+        </div>
       </div>
     </div>
   );

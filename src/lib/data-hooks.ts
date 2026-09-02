@@ -79,6 +79,15 @@ export function useInvoices() {
 
   useEffect(() => {
     load();
+    const refreshIfVisible = () => {
+      if (document.visibilityState === "visible" && navigator.onLine) load();
+    };
+    const interval = window.setInterval(refreshIfVisible, 15_000);
+    window.addEventListener("focus", refreshIfVisible);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refreshIfVisible);
+    };
   }, [load, online]);
 
   return { invoices, loading, error, refresh: load };
@@ -142,6 +151,15 @@ export function useClients() {
 
   useEffect(() => {
     load();
+    const refreshIfVisible = () => {
+      if (document.visibilityState === "visible" && navigator.onLine) load();
+    };
+    const interval = window.setInterval(refreshIfVisible, 15_000);
+    window.addEventListener("focus", refreshIfVisible);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refreshIfVisible);
+    };
   }, [load, online]);
 
   return { clients, loading, refresh: load };
@@ -215,6 +233,15 @@ export function useProducts() {
 
   useEffect(() => {
     load();
+    const refreshIfVisible = () => {
+      if (document.visibilityState === "visible" && navigator.onLine) load();
+    };
+    const interval = window.setInterval(refreshIfVisible, 15_000);
+    window.addEventListener("focus", refreshIfVisible);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refreshIfVisible);
+    };
   }, [load, online]);
 
   return { products, loading, refresh: load };

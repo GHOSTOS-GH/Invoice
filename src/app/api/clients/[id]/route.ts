@@ -19,7 +19,7 @@ export async function GET(
       where: { id },
       include: { invoices: { orderBy: { createdAt: "desc" } } },
     });
-    if (!client || client.createdBy !== user.id) {
+    if (!client) {
       return Response.json({ error: "Client introuvable" }, { status: 404 });
     }
     return Response.json(client);
@@ -40,7 +40,7 @@ export async function PUT(
     const { id } = await params;
     const body = await req.json();
     const existing = await db.client.findUnique({ where: { id } });
-    if (!existing || existing.createdBy !== user.id) {
+    if (!existing) {
       return Response.json({ error: "Client introuvable" }, { status: 404 });
     }
     const updated = await db.client.update({
@@ -69,7 +69,7 @@ export async function DELETE(
     }
     const { id } = await params;
     const existing = await db.client.findUnique({ where: { id } });
-    if (!existing || existing.createdBy !== user.id) {
+    if (!existing) {
       return Response.json({ error: "Client introuvable" }, { status: 404 });
     }
     await db.client.delete({ where: { id } });

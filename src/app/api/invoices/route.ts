@@ -1,5 +1,4 @@
-// GET /api/invoices — list invoices for the current user (RLS-equivalent)
-// Employees/admins see all invoices they created; clients see nothing (empty list).
+// GET /api/invoices — list shared company invoices.
 import { db } from "@/lib/db";
 import { requireAuth, authErrorResponse } from "@/lib/auth";
 
@@ -13,7 +12,6 @@ export async function GET() {
       return Response.json([]);
     }
     const invoices = await db.invoice.findMany({
-      where: { createdBy: user.id },
       include: { items: true },
       orderBy: { createdAt: "desc" },
     });

@@ -54,9 +54,12 @@ Créer un fichier `.env` à la racine :
 DATABASE_URL="postgresql://postgres.<PROJECT_REF>:<MOT_DE_PASSE>@<POOLER_HOST>:6543/postgres?pgbouncer=true"
 DIRECT_URL="postgresql://postgres.<PROJECT_REF>:<MOT_DE_PASSE>@<DIRECT_HOST>:5432/postgres"
 JWT_SECRET="votre-secret-jwt-tres-long-et-aleatoire"
+SUPABASE_URL="https://<PROJECT_REF>.supabase.co"
+SUPABASE_SERVICE_ROLE_KEY="<CLE_SERVICE_ROLE_SUPABASE>"
 ```
 
 Copier les deux URLs depuis le tableau de bord Supabase. Ne jamais commiter `.env` ni le mot de passe réel.
+`SUPABASE_SERVICE_ROLE_KEY` est une clé serveur strictement privée : elle est nécessaire pour envoyer les images vers le bucket `product-images` et ne doit jamais commencer par `NEXT_PUBLIC_`.
 
 Le fichier `.env` est déjà exclu du dépôt par `.gitignore`. Pour vérifier qu'il est bien ignoré :
 
@@ -261,6 +264,8 @@ L'import supporte le mapping automatique des colonnes et le choix entre "Remplac
    - `DATABASE_URL` : URL poolée Supabase, port `6543`, avec `pgbouncer=true`.
    - `DIRECT_URL` : URL directe Supabase, port `5432`, utilisée par Prisma.
    - `JWT_SECRET` : chaîne aléatoire d'au moins 64 caractères.
+  - `SUPABASE_URL` : URL du projet Supabase, par exemple `https://<PROJECT_REF>.supabase.co`.
+  - `SUPABASE_SERVICE_ROLE_KEY` : clé `service_role` Supabase, uniquement côté serveur.
 4. Déployer l'application.
 5. Appliquer le schéma et RLS depuis un environnement disposant des URLs Supabase :
 
@@ -271,6 +276,8 @@ npx prisma db execute --file prisma/rls.sql --schema prisma/schema.prisma
 ```
 
 6. Créer le premier admin avec `bun scripts/seed.ts` ou `npx --yes tsx scripts/seed.ts`.
+
+Le bucket Storage `product-images` est créé automatiquement au premier upload et rendu public en lecture. L'écriture reste protégée par l'API Next.js et `requireAuth`.
 
 ## Installation PWA
 

@@ -1,6 +1,5 @@
 "use client";
-// New / edit invoice — reproduces new_invoice_screen.dart:
-// client input with suggestions, item entry, discount, tax, live totals.
+// New / edit invoice with client suggestions, item entry and live totals.
 
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useClients, useProducts, saveInvoice, createClient } from "@/lib/data-hooks";
@@ -322,14 +321,15 @@ export function NewInvoiceScreen({ editInvoiceId }: { editInvoiceId?: string }) 
               variant="outline"
               size="sm"
               onClick={() => setShowProductPicker(true)}
-              className="rounded-xl h-8"
+              className="rounded-xl h-10 border-[#2563EB] text-[#2563EB] font-bold"
             >
-              <Package className="w-3.5 h-3.5 mr-1.5" /> Bibliothèque
+              <Package className="w-5 h-5 mr-1.5" /> Choisir un produit
             </Button>
           </div>
 
           {/* Item entry form */}
           <div className="grid grid-cols-12 gap-2 mb-3">
+            <div className="col-span-12 text-[11px] font-semibold text-slate-500 sm:hidden">Nom · Quantité · Prix unitaire</div>
             <div className="col-span-12 sm:col-span-5">
               <Input
                 id="item-name-input"
@@ -402,13 +402,16 @@ export function NewInvoiceScreen({ editInvoiceId }: { editInvoiceId?: string }) 
                   className="flex items-center gap-2 bg-slate-50 rounded-xl p-2.5"
                 >
                   <div className="flex-1 min-w-0">
+                    <span className="sr-only">Nom de l'article</span>
                     <Input
                       value={it.name}
                       onChange={(e) => updateItem(it.id, "name", e.target.value)}
                       className="h-8 rounded-lg border-transparent bg-white text-[13px] font-medium"
                     />
                   </div>
-                  <Input
+                  <div className="w-14 shrink-0">
+                    <span className="sr-only">Quantité</span>
+                    <Input
                     type="number"
                     min="1"
                     value={it.quantity}
@@ -416,8 +419,11 @@ export function NewInvoiceScreen({ editInvoiceId }: { editInvoiceId?: string }) 
                       updateItem(it.id, "quantity", Math.max(1, Number(e.target.value) || 1))
                     }
                     className="h-8 w-14 rounded-lg border-transparent bg-white text-[13px] text-center"
-                  />
-                  <Input
+                    />
+                  </div>
+                  <div className="w-24 shrink-0">
+                    <span className="sr-only">Prix unitaire</span>
+                    <Input
                     type="number"
                     min="0"
                     value={it.unitPrice}
@@ -425,8 +431,10 @@ export function NewInvoiceScreen({ editInvoiceId }: { editInvoiceId?: string }) 
                       updateItem(it.id, "unitPrice", Math.max(0, Number(e.target.value) || 0))
                     }
                     className="h-8 w-24 rounded-lg border-transparent bg-white text-[13px] text-right"
-                  />
+                    />
+                  </div>
                   <div className="w-28 text-right text-[13px] font-bold text-[#2563EB] shrink-0">
+                    <span className="sr-only">Sous-total : </span>
                     {formatCurrency(itemSubtotal(it))}
                   </div>
                   <button
@@ -470,7 +478,7 @@ export function NewInvoiceScreen({ editInvoiceId }: { editInvoiceId?: string }) 
         </div>
 
         {/* Save */}
-        <div className="flex gap-3 pb-4">
+        <div className="sticky bottom-0 z-10 flex gap-3 pb-4 pt-3 bg-slate-50/95 backdrop-blur-sm">
           <Button
             variant="outline"
             onClick={() => navigate("invoices")}
@@ -481,7 +489,7 @@ export function NewInvoiceScreen({ editInvoiceId }: { editInvoiceId?: string }) 
           <Button
             onClick={handleSave}
             disabled={saving}
-            className="rounded-xl h-12 flex-1 bg-[#2563EB] hover:bg-[#1D4ED8]"
+            className="rounded-xl h-12 flex-1 bg-[#2563EB] hover:bg-[#1D4ED8] text-base font-bold"
           >
             {saving ? (
               <Loader2 className="w-4 h-4 animate-spin mr-2" />
