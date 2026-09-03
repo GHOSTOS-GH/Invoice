@@ -30,9 +30,9 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
-    if (password.length < 4) {
+    if (!/^[0-9]{4,8}$/.test(password)) {
       return Response.json(
-        { error: "Le mot de passe doit faire au moins 4 caractères" },
+        { error: "Le mot de passe doit être un code numérique de 4 à 8 chiffres" },
         { status: 400 }
       );
     }

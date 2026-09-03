@@ -31,7 +31,7 @@ model Invoice {
   clientName String
   clientId   String?  // optional real relation to Client
   client     Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
-  status     String   @default("enCours") // enCours | enLivraison | livree | archivee
+  status     String   @default("enCours") // enCours | enLivraison | livree
   notes      String?
   createdBy  String
   creator    User     @relation(fields: [createdBy], references: [id], onDelete: Cascade)

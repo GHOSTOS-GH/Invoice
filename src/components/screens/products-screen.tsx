@@ -85,25 +85,32 @@ async function compressImage(
   maxDim = 800,
   quality = 0.8
 ): Promise<File> {
+  const debug = (...args: unknown[]) => {
+    if (process.env.NODE_ENV !== "production") console.debug("[product-image]", ...args);
+  };
   if (
     !file.type.startsWith("image/") ||
     file.type === "image/gif" ||
     file.type === "image/svg+xml"
   ) {
+    debug("Compression ignorée", file.type);
     return file;
   }
+  debug("Lecture du fichier", file.name, file.size);
   const dataUrl = await new Promise<string>((resolve, reject) => {
     const fr = new FileReader();
     fr.onload = () => resolve(fr.result as string);
-    fr.onerror = () => reject(new Error("Lecture du fichier échouée"));
+    fr.onerror = () => reject(new Error("Lecture du fichier échouée (FileReader)"));
     fr.readAsDataURL(file);
   });
+  debug("FileReader terminé");
   const img = await new Promise<HTMLImageElement>((resolve, reject) => {
     const i = document.createElement("img");
     i.onload = () => resolve(i);
-    i.onerror = () => reject(new Error("Image invalide"));
+    i.onerror = () => reject(new Error("Chargement de l'image échoué"));
     i.src = dataUrl;
   });
+  debug("Image chargée", img.width, img.height);
   let { width, height } = img;
   if (width > maxDim || height > maxDim) {
     if (width >= height) {
@@ -118,15 +125,26 @@ async function compressImage(
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext("2d");
-  if (!ctx) return file;
+  if (!ctx) {
+    debug("Canvas 2D indisponible, fallback original");
+    return file;
+  }
   // Paint a white background so transparent PNGs don't become black on JPEG.
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, width, height);
   ctx.drawImage(img, 0, 0, width, height);
-  const blob: Blob | null = await new Promise((resolve) =>
-    canvas.toBlob((b) => resolve(b), "image/jpeg", quality)
-  );
-  if (!blob) return file;
+  const blob: Blob | null = await new Promise((resolve, reject) => {
+    try {
+      canvas.toBlob((b) => resolve(b), "image/jpeg", quality);
+    } catch {
+      reject(new Error("Compression canvas.toBlob non supportée"));
+    }
+  });
+  if (!blob) {
+    debug("canvas.toBlob a renvoyé null, fallback original");
+    return file;
+  }
+  debug("Compression terminée", blob.size);
   const renamed = file.name.replace(/\.[^.]+$/, "") + ".jpg";
   return new File([blob], renamed, { type: "image/jpeg" });
 }
@@ -205,8 +223,16 @@ function ProductFormDialog({
     // Compress + upload.
     try {
       setUploading(true);
-      const compressed = await compressImage(file);
-      const remoteUrl = await uploadImage(compressed);
+      let remoteUrl: string;
+      try {
+        const compressed = await compressImage(file);
+        remoteUrl = await uploadImage(compressed);
+      } catch (compressionError) {
+        const message = compressionError instanceof Error ? compressionError.message : "erreur inconnue";
+        if (process.env.NODE_ENV !== "production") console.debug("[product-image] fallback original", message);
+        toast.error(`Compression impossible : ${message}. Envoi du fichier original…`);
+        remoteUrl = await uploadImage(file);
+      }
       setImageUrl(remoteUrl);
       toast.success("Image téléversée");
     } catch (e: unknown) {

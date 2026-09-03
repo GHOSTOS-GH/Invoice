@@ -108,9 +108,9 @@ export function NewInvoiceScreen({ editInvoiceId }: { editInvoiceId?: string }) 
     if (!clientName.trim()) return [];
     const q = clientName.toLowerCase();
     return clients
-      .filter((c) => c.name.toLowerCase().includes(q))
+      .filter((c) => c.name.toLowerCase().includes(q) || (c.phone ?? "").toLowerCase().includes(q))
       .slice(0, 5)
-      .map((c) => c.name);
+      .map((c) => ({ id: c.id, name: c.name, phone: c.phone }));
   }, [clientName, clients]);
 
   const filteredProducts = useMemo(() => {
@@ -180,10 +180,6 @@ export function NewInvoiceScreen({ editInvoiceId }: { editInvoiceId?: string }) 
   };
 
   const handleSave = async () => {
-    if (!clientName.trim()) {
-      toast.error("Veuillez saisir le nom du client");
-      return;
-    }
     if (items.length === 0) {
       toast.error("Veuillez ajouter au moins un article");
       return;
@@ -204,7 +200,7 @@ export function NewInvoiceScreen({ editInvoiceId }: { editInvoiceId?: string }) 
 
       await saveInvoice({
         id: invoiceId,
-        clientName: clientName.trim(),
+        clientName: clientName.trim() || "Client",
         clientId,
         status,
         notes: notes.trim() || null,
@@ -267,21 +263,21 @@ export function NewInvoiceScreen({ editInvoiceId }: { editInvoiceId?: string }) 
               }}
               onFocus={() => setShowClientSuggestions(true)}
               onBlur={() => setTimeout(() => setShowClientSuggestions(false), 150)}
-              placeholder="Nom du client"
+              placeholder="Client"
               className="h-11 rounded-xl"
             />
             {showClientSuggestions && clientSuggestions.length > 0 && (
               <div className="absolute z-20 top-full mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-lg max-h-48 overflow-y-auto">
-                {clientSuggestions.map((name) => (
+                {clientSuggestions.map((client) => (
                   <button
-                    key={name}
+                    key={client.id}
                     onMouseDown={() => {
-                      setClientName(name);
+                      setClientName(client.name);
                       setShowClientSuggestions(false);
                     }}
                     className="w-full text-left px-3 py-2 text-[13px] hover:bg-slate-50"
                   >
-                    {name}
+                    {client.name} ({client.phone || "sans téléphone"})
                   </button>
                 ))}
               </div>
@@ -395,22 +391,27 @@ export function NewInvoiceScreen({ editInvoiceId }: { editInvoiceId?: string }) 
               Aucun article. Ajoutez-en un ci-dessus ou choisissez depuis la bibliothèque.
             </div>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-4">
               {items.map((it) => (
                 <div
                   key={it.id}
-                  className="flex items-center gap-2 bg-slate-50 rounded-xl p-2.5"
+                  className="bg-slate-50 rounded-xl p-3.5 space-y-3"
                 >
-                  <div className="flex-1 min-w-0">
-                    <span className="sr-only">Nom de l'article</span>
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 min-w-0">
                     <Input
                       value={it.name}
                       onChange={(e) => updateItem(it.id, "name", e.target.value)}
                       className="h-8 rounded-lg border-transparent bg-white text-[13px] font-medium"
                     />
+                    </div>
+                    <button onClick={() => removeItem(it.id)} className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg shrink-0" aria-label="Supprimer l'article">
+                      <Trash2 className="w-4 h-4" />
+                    </button>
                   </div>
-                  <div className="w-14 shrink-0">
-                    <span className="sr-only">Quantité</span>
+                  <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label className="text-[11px] text-slate-500">Quantité</Label>
                     <Input
                     type="number"
                     min="1"
@@ -418,11 +419,11 @@ export function NewInvoiceScreen({ editInvoiceId }: { editInvoiceId?: string }) 
                     onChange={(e) =>
                       updateItem(it.id, "quantity", Math.max(1, Number(e.target.value) || 1))
                     }
-                    className="h-8 w-14 rounded-lg border-transparent bg-white text-[13px] text-center"
+                    className="h-9 w-full rounded-lg border-transparent bg-white text-[13px] text-center"
                     />
                   </div>
-                  <div className="w-24 shrink-0">
-                    <span className="sr-only">Prix unitaire</span>
+                  <div>
+                    <Label className="text-[11px] text-slate-500">Prix unitaire</Label>
                     <Input
                     type="number"
                     min="0"
@@ -430,19 +431,14 @@ export function NewInvoiceScreen({ editInvoiceId }: { editInvoiceId?: string }) 
                     onChange={(e) =>
                       updateItem(it.id, "unitPrice", Math.max(0, Number(e.target.value) || 0))
                     }
-                    className="h-8 w-24 rounded-lg border-transparent bg-white text-[13px] text-right"
+                    className="h-9 w-full rounded-lg border-transparent bg-white text-[13px] text-right"
                     />
                   </div>
-                  <div className="w-28 text-right text-[13px] font-bold text-[#2563EB] shrink-0">
-                    <span className="sr-only">Sous-total : </span>
-                    {formatCurrency(itemSubtotal(it))}
                   </div>
-                  <button
-                    onClick={() => removeItem(it.id)}
-                    className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg shrink-0"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  <div className="flex items-center justify-between border-t border-slate-200 pt-2 text-[13px] font-bold text-[#2563EB]">
+                    <span>Sous-total</span>
+                    <span>{formatCurrency(itemSubtotal(it))}</span>
+                  </div>
                 </div>
               ))}
             </div>

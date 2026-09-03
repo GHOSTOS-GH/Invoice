@@ -78,6 +78,9 @@ export async function POST(req: Request) {
 
     return Response.json({ url: `${supabaseUrl}/storage/v1/object/public/${BUCKET}/${path}` });
   } catch (err) {
+    if (err instanceof Error && err.message === "Configuration Supabase Storage manquante") {
+      return Response.json({ error: "SUPABASE_SERVICE_ROLE_KEY et SUPABASE_URL sont requis pour l'upload d'image" }, { status: 503 });
+    }
     return authErrorResponse(err);
   }
 }

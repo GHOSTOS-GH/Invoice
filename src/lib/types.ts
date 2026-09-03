@@ -1,6 +1,6 @@
 // Shared TypeScript domain types — mirrors the Prisma models
 
-export type InvoiceStatus = "enCours" | "enLivraison" | "livree" | "archivee";
+export type InvoiceStatus = "enCours" | "enLivraison" | "livree";
 export type UserRole = "client" | "employee" | "admin";
 
 export interface InvoiceItem {

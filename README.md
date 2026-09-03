@@ -8,7 +8,7 @@ Application web professionnelle (PWA installable, fonctionnant hors ligne) repro
 - **Rôles** : client (accès limité), employé (factures/clients/produits), admin (accès total + maintenance + gestion des comptes)
 - **Factures** : création, modification, duplication, changement de statut, archivage, suppression
 - **Calculs fidèles** : sous-total et total à payer sans TVA ni remise
-- **Statuts** : En cours (#6B4C4C), En livraison (#FFC107), Livrée (#4CAF50), Archivée (#9E9E9E)
+- **Statuts** : En cours (#6B4C4C), En livraison (#FFC107), Livrée (#4CAF50)
 - **Clients & Produits** : gestion complète avec catégories et images
 - **Statistiques** : chiffre d'affaires, KPIs, graphiques (bar + donut), top 5 clients/produits
 - **Import/Export CSV** : compatible avec l'historique de l'app mobile
@@ -89,23 +89,7 @@ Si la commande `bun` n'est pas reconnue sous Windows, redémarrer le terminal ap
 & "$env:USERPROFILE\.bun\bin\bun.exe" --version
 ```
 
-Alternative sans Bun :
-
-```bash
-npx --yes tsx scripts/seed.ts
-```
-
-Crée un admin (`+221770000000` / `admin1234`), un employé (`+221771111111` / `employe1234`), et des données de démonstration (produits, clients, 24 factures).
-
-**Option B — API de bootstrap (production)**
-
-```bash
-curl -X POST http://localhost:3000/api/seed \
-  -H "Content-Type: application/json" \
-  -d '{"phone":"+221770000000","password":"votre-mot-de-passe","name":"Admin"}'
-```
-
-> ⚠️ Cette route est désactivée dès qu'un compte admin existe. Elle refuse de s'exécuter en production si un admin est déjà présent.
+Le projet ne contient aucun seed ni compte préconfiguré. Créer le premier compte depuis l'écran d'inscription, puis gérer son rôle via une procédure d'administration sécurisée.
 
 > **Sécurité** : Aucune action dans l'interface ne permet de devenir admin. Le rôle n'est assignable que par modification directe de la base ou par un admin existant via l'écran Comptes. Les nouveaux comptes créés via inscription ont toujours le rôle `client`.
 
@@ -130,7 +114,6 @@ Chaque route API vérifie l'authentification et le rôle côté serveur (jamais 
 | `/api/auth/logout` | POST | authentifié | `requireAuth()` |
 | `/api/auth/me` | GET | authentifié | `requireAuth()` |
 | `/api/maintenance` | GET | public | — (pour l'écran de login) |
-| `/api/seed` | POST | public | — (désactivée si un admin existe déjà) |
 | `/api/invoices` | GET | employé | `requireAuth()` + client→403 |
 | `/api/invoices/[id]` | GET | employé | `requireAuth()` + client→403 |
 | `/api/invoices/[id]` | PUT | employé | `requireAuth()` + client→403 |
@@ -231,7 +214,7 @@ src/
 Reproduit fidèlement `lib/models/invoice.dart` et `lib/models/product.dart` :
 
 - **User** : id, phone (+221), passwordHash, role (client/employee/admin), name, disabled
-- **Invoice** : id, clientName, clientId, status (enCours/enLivraison/livree/archivee), notes, createdBy, createdAt, updatedAt
+- **Invoice** : id, clientName, clientId, status (enCours/enLivraison/livree), notes, createdBy, createdAt, updatedAt
 - **InvoiceItem** : id, invoiceId, name, quantity, unitPrice
 - **Client** : id, name, phone, address, createdBy
 - **Product** : id, name, category, imageUrl, createdBy
@@ -275,7 +258,7 @@ npx prisma db push
 npx prisma db execute --file prisma/rls.sql --schema prisma/schema.prisma
 ```
 
-6. Créer le premier admin avec `bun scripts/seed.ts` ou `npx --yes tsx scripts/seed.ts`.
+6. Créer le premier compte depuis l'inscription, puis lui attribuer le rôle administrateur avec une procédure SQL protégée.
 
 Le bucket Storage `product-images` est créé automatiquement au premier upload et rendu public en lecture. L'écriture reste protégée par l'API Next.js et `requireAuth`.
 
@@ -288,13 +271,6 @@ Le bucket Storage `product-images` est créé automatiquement au premier upload 
 
 Sur desktop Chrome : cliquer sur l'icône "Installer" dans la barre d'adresse.
 
-## Comptes de démonstration
-
-| Rôle | Téléphone | Mot de passe |
-|------|-----------|--------------|
-| Admin | +221770000000 | admin1234 |
-| Employé | +221771111111 | employe1234 |
-
 ## Scripts
 
 ```bash
@@ -302,7 +278,6 @@ bun run dev        # Développement (port 3000)
 bun run lint       # ESLint
 bun run db:push    # Synchroniser le schéma Prisma
 bun run db:generate # Régénérer le client Prisma
-bun scripts/seed.ts # Données de démonstration
 ```
 
 ## Licence

@@ -105,11 +105,9 @@ function parseStatus(raw: string | undefined): InvoiceStatus {
   if (v === "encours" || v === "en cours" || v === "en_cours") return "enCours";
   if (v === "enlivraison" || v === "en livraison" || v === "en_livraison") return "enLivraison";
   if (v === "livree" || v === "livrée" || v === "livre") return "livree";
-  if (v === "archivee" || v === "archivée" || v === "archive") return "archivee";
   // English fallbacks
   if (v === "pending" || v === "draft") return "enCours";
   if (v === "delivered" || v === "paid") return "livree";
-  if (v === "archived") return "archivee";
   return "enCours";
 }
 
@@ -395,41 +393,28 @@ export function CsvImportScreen() {
       }
 
       let imported = 0;
-      let idx = 0;
-      for (const g of groups) {
-        idx++;
-        setProgressLabel(
-          `Création facture ${idx}/${groups.length} — ${g.clientName}`
-        );
-        const items: InvoiceItem[] = g.items.map((it) => ({
-          id: genItemId(),
-          name: it.name,
-          quantity: it.quantity,
-          unitPrice: it.unitPrice,
+      const batchSize = 10;
+      for (let start = 0; start < groups.length; start += batchSize) {
+        const batch = groups.slice(start, start + batchSize);
+        setProgressLabel(`Création des factures ${start + 1}-${start + batch.length}/${groups.length}…`);
+        const results = await Promise.all(batch.map(async (g) => {
+          const items: InvoiceItem[] = g.items.map((it) => ({ id: genItemId(), name: it.name, quantity: it.quantity, unitPrice: it.unitPrice }));
+          const invoice: Partial<Invoice> & { id: string; clientName: string; items: InvoiceItem[] } = {
+            id: genInvoiceId(), clientName: g.clientName, status: g.status, notes: g.notes || null,
+            items, createdAt: g.createdAt, updatedAt: new Date().toISOString(),
+          };
+          try {
+            await saveInvoice(invoice);
+            return true;
+          } catch (err) {
+            console.error("Import failed for one invoice", err);
+            return false;
+          }
         }));
-        const invoice: Partial<Invoice> & {
-          id: string;
-          clientName: string;
-          items: InvoiceItem[];
-        } = {
-          id: genInvoiceId(),
-          clientName: g.clientName,
-          status: g.status,
-          notes: g.notes || null,
-          items,
-          createdAt: g.createdAt,
-          updatedAt: new Date().toISOString(),
-        };
-        try {
-          await saveInvoice(invoice);
-          imported++;
-        } catch (err: any) {
-          console.error("Import failed for one invoice", err);
-        }
-        done++;
+        imported += results.filter(Boolean).length;
+        done += batch.length;
         setProgress(Math.round((done / total) * 100));
-        // Yield to the UI thread for smoother progress updates
-        await new Promise((r) => setTimeout(r, 5));
+        await new Promise((resolve) => setTimeout(resolve, 5));
       }
 
       setProgress(100);

@@ -2,7 +2,7 @@
 // Data hooks: fetch from API (online) with IndexedDB fallback (offline).
 // Mutations write to the API and, on failure, queue locally for sync.
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import type { Invoice, Client, Product, Settings, InvoiceItem } from "@/lib/types";
 import { getDB, enqueueSync, setMeta, getMeta } from "@/lib/offline-db";
 import { useSyncStatus } from "@/components/shared/sync-status";
@@ -26,14 +26,16 @@ export function useInvoices() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { online } = useSyncStatus();
+  const hasData = useRef(false);
 
   const load = useCallback(async () => {
-    setLoading(true);
+    setLoading(!hasData.current);
     setError(null);
     try {
       if (navigator.onLine) {
         const data = await api<Invoice[]>("/api/invoices");
         setInvoices(data);
+        hasData.current = true;
         // Cache locally
         try {
           const db = getDB();
@@ -79,14 +81,20 @@ export function useInvoices() {
 
   useEffect(() => {
     load();
-    const refreshIfVisible = () => {
-      if (document.visibilityState === "visible" && navigator.onLine) load();
+    let lastFocusRefresh = 0;
+    const refreshOnFocus = () => {
+      const now = Date.now();
+      if (document.visibilityState === "visible" && navigator.onLine && now - lastFocusRefresh >= 120_000) {
+        lastFocusRefresh = now;
+        load();
+      }
     };
-    const interval = window.setInterval(refreshIfVisible, 15_000);
-    window.addEventListener("focus", refreshIfVisible);
+    window.addEventListener("focus", refreshOnFocus);
+    const refreshOnRequest = () => load();
+    window.addEventListener("invoice-sync-request", refreshOnRequest);
     return () => {
-      window.clearInterval(interval);
-      window.removeEventListener("focus", refreshIfVisible);
+      window.removeEventListener("focus", refreshOnFocus);
+      window.removeEventListener("invoice-sync-request", refreshOnRequest);
     };
   }, [load, online]);
 
@@ -123,13 +131,15 @@ export function useClients() {
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
   const { online } = useSyncStatus();
+  const hasData = useRef(false);
 
   const load = useCallback(async () => {
-    setLoading(true);
+    setLoading(!hasData.current);
     try {
       if (navigator.onLine) {
         const data = await api<Client[]>("/api/clients");
         setClients(data);
+        hasData.current = true;
         try {
           const db = getDB();
           await db.clients.clear();
@@ -151,14 +161,20 @@ export function useClients() {
 
   useEffect(() => {
     load();
-    const refreshIfVisible = () => {
-      if (document.visibilityState === "visible" && navigator.onLine) load();
+    let lastFocusRefresh = 0;
+    const refreshOnFocus = () => {
+      const now = Date.now();
+      if (document.visibilityState === "visible" && navigator.onLine && now - lastFocusRefresh >= 120_000) {
+        lastFocusRefresh = now;
+        load();
+      }
     };
-    const interval = window.setInterval(refreshIfVisible, 15_000);
-    window.addEventListener("focus", refreshIfVisible);
+    window.addEventListener("focus", refreshOnFocus);
+    const refreshOnRequest = () => load();
+    window.addEventListener("invoice-sync-request", refreshOnRequest);
     return () => {
-      window.clearInterval(interval);
-      window.removeEventListener("focus", refreshIfVisible);
+      window.removeEventListener("focus", refreshOnFocus);
+      window.removeEventListener("invoice-sync-request", refreshOnRequest);
     };
   }, [load, online]);
 
@@ -205,13 +221,15 @@ export function useProducts() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const { online } = useSyncStatus();
+  const hasData = useRef(false);
 
   const load = useCallback(async () => {
-    setLoading(true);
+    setLoading(!hasData.current);
     try {
       if (navigator.onLine) {
         const data = await api<Product[]>("/api/products");
         setProducts(data);
+        hasData.current = true;
         try {
           const db = getDB();
           await db.products.clear();
@@ -233,14 +251,20 @@ export function useProducts() {
 
   useEffect(() => {
     load();
-    const refreshIfVisible = () => {
-      if (document.visibilityState === "visible" && navigator.onLine) load();
+    let lastFocusRefresh = 0;
+    const refreshOnFocus = () => {
+      const now = Date.now();
+      if (document.visibilityState === "visible" && navigator.onLine && now - lastFocusRefresh >= 120_000) {
+        lastFocusRefresh = now;
+        load();
+      }
     };
-    const interval = window.setInterval(refreshIfVisible, 15_000);
-    window.addEventListener("focus", refreshIfVisible);
+    window.addEventListener("focus", refreshOnFocus);
+    const refreshOnRequest = () => load();
+    window.addEventListener("invoice-sync-request", refreshOnRequest);
     return () => {
-      window.clearInterval(interval);
-      window.removeEventListener("focus", refreshIfVisible);
+      window.removeEventListener("focus", refreshOnFocus);
+      window.removeEventListener("invoice-sync-request", refreshOnRequest);
     };
   }, [load, online]);
 

@@ -138,8 +138,11 @@ export function LoginScreen() {
                   id="password"
                   type={showPwd ? "text" : "password"}
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={(e) => setPassword(e.target.value.replace(/\D/g, "").slice(0, 8))}
                   placeholder="••••••••"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={8}
                   className="h-12 rounded-[14px] border-slate-200 bg-slate-50/50 pl-10 pr-10"
                 />
                 <button
@@ -197,12 +200,6 @@ export function LoginScreen() {
             </button>
           </div>
 
-          {/* Demo credentials hint */}
-          <div className="mt-6 rounded-xl bg-slate-50 border border-slate-100 p-3.5 text-[12px] text-slate-500 leading-relaxed">
-            <p className="font-semibold text-slate-600 mb-1">Comptes de démonstration :</p>
-            <p>Admin : <span className="font-mono text-slate-700">+221770000000</span> / <span className="font-mono text-slate-700">admin1234</span></p>
-            <p>Employé : <span className="font-mono text-slate-700">+221771111111</span> / <span className="font-mono text-slate-700">employe1234</span></p>
-          </div>
         </div>
       </div>
     </div>

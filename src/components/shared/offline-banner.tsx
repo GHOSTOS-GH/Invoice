@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from "react";
 export function OfflineBanner() {
   const { online, pending, syncing } = useSyncStatus();
   const [recentlySynced, setRecentlySynced] = useState(false);
+  const [manualSyncing, setManualSyncing] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -20,6 +21,13 @@ export function OfflineBanner() {
       };
     }
   }, [pending, syncing, online]);
+
+  const requestSync = () => {
+    if (!online || manualSyncing) return;
+    setManualSyncing(true);
+    window.dispatchEvent(new Event("invoice-sync-request"));
+    window.setTimeout(() => setManualSyncing(false), 1200);
+  };
 
   if (!online) {
     return (
@@ -64,5 +72,13 @@ export function OfflineBanner() {
     );
   }
 
-  return null;
+  return (
+    <div className="sticky top-0 z-50 bg-slate-700 text-white text-[13px] font-medium px-4 py-2 flex items-center justify-center gap-2 shadow-md">
+      <CheckCircle2 className="w-4 h-4" />
+      <span>Données à jour</span>
+      <button onClick={requestSync} className="ml-2 inline-flex items-center gap-1 rounded-lg bg-white/15 px-2.5 py-1 text-[12px] hover:bg-white/25" aria-label="Synchroniser">
+        <RefreshCw className={`w-3.5 h-3.5 ${manualSyncing ? "animate-spin" : ""}`} /> {manualSyncing ? "Synchronisation…" : "Synchroniser"}
+      </button>
+    </div>
+  );
 }

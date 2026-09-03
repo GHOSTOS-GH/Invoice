@@ -63,7 +63,6 @@ export function DashboardScreen() {
       enCours: 0,
       enLivraison: 0,
       livree: 0,
-      archivee: 0,
     };
     for (const inv of invoices) statusCounts[inv.status]++;
 

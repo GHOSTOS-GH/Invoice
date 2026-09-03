@@ -11,7 +11,7 @@ export const buttonRadiusClass = "rounded-[14px]";
 export const inputRadiusClass = "rounded-[14px]";
 
 // Invoice status enum reproduction (InvoiceStatus in invoice.dart)
-export type InvoiceStatus = "enCours" | "enLivraison" | "livree" | "archivee";
+export type InvoiceStatus = "enCours" | "enLivraison" | "livree";
 
 export const INVOICE_STATUS_META: Record<
   InvoiceStatus,
@@ -38,20 +38,12 @@ export const INVOICE_STATUS_META: Record<
     text: "text-[#4CAF50]",
     dot: "bg-[#4CAF50]",
   },
-  archivee: {
-    label: "Archivée",
-    color: "#9E9E9E",
-    bg: "bg-[#9E9E9E]/10",
-    text: "text-[#9E9E9E]",
-    dot: "bg-[#9E9E9E]",
-  },
 };
 
 export const INVOICE_STATUSES: InvoiceStatus[] = [
   "enCours",
   "enLivraison",
   "livree",
-  "archivee",
 ];
 
 export type UserRole = "client" | "employee" | "admin";

@@ -14,6 +14,7 @@ import {
   useClients,
   uploadImage,
 } from "@/lib/data-hooks";
+import { clearAllLocal, countPendingSync, getDB } from "@/lib/offline-db";
 import { useNav } from "@/components/app-shell";
 import {
   ScreenHeader,
@@ -438,6 +439,42 @@ function MaintenanceTab({ settings }: { settings: SettingsType }) {
     settings.maintenanceMode || false
   );
   const [saving, setSaving] = useState(false);
+  const [pendingCount, setPendingCount] = useState(0);
+  const [cacheCount, setCacheCount] = useState(0);
+
+  const refreshLocalCounts = async () => {
+    setPendingCount(await countPendingSync());
+    try {
+      const db = getDB();
+      const counts = await Promise.all([db.invoices.count(), db.clients.count(), db.products.count()]);
+      setCacheCount(counts.reduce((sum, count) => sum + count, 0));
+    } catch {
+      setCacheCount(0);
+    }
+  };
+
+  useEffect(() => {
+    refreshLocalCounts();
+    const interval = window.setInterval(refreshLocalCounts, 5000);
+    return () => window.clearInterval(interval);
+  }, []);
+
+  const clearPending = async () => {
+    if (!window.confirm("Vider définitivement les synchronisations en attente ?")) return;
+    try {
+      await getDB().syncQueue.clear();
+      await refreshLocalCounts();
+      toast.success("Synchronisation en attente vidée");
+    } catch {
+      toast.error("Impossible de vider la synchronisation");
+    }
+  };
+
+  const resetCache = async () => {
+    if (!window.confirm("Réinitialiser tout le cache local ?")) return;
+    await clearAllLocal();
+    window.location.reload();
+  };
 
   useEffect(() => {
     setMaintenanceMode(!!settings.maintenanceMode);
@@ -574,6 +611,25 @@ function MaintenanceTab({ settings }: { settings: SettingsType }) {
             </span>
           </li>
         </ul>
+      </SectionCard>
+
+      <SectionCard title="Outils de maintenance">
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-[13px] font-semibold text-slate-800">Vider la synchronisation en attente</p>
+              <p className="text-[12px] text-slate-500">{pendingCount} élément{pendingCount !== 1 ? "s" : ""} en attente</p>
+            </div>
+            <Button variant="outline" size="sm" onClick={clearPending} disabled={pendingCount === 0}>Vider</Button>
+          </div>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-[13px] font-semibold text-slate-800">Réinitialiser le cache local</p>
+              <p className="text-[12px] text-slate-500">{cacheCount} donnée{cacheCount !== 1 ? "s" : ""} locale{cacheCount !== 1 ? "s" : ""}</p>
+            </div>
+            <Button variant="outline" size="sm" onClick={resetCache} disabled={cacheCount === 0}>Réinitialiser</Button>
+          </div>
+        </div>
       </SectionCard>
     </div>
   );

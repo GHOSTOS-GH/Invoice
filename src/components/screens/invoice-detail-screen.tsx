@@ -1,6 +1,6 @@
 "use client";
 // Invoice detail — reproduces invoice_detail_screen.dart:
-// view, edit, duplicate, archive, change status, delete, PDF, PNG, share.
+// view, edit, duplicate, change status, delete, PDF, PNG, share.
 
 import { useState, useEffect, useRef } from "react";
 import { useNav } from "@/components/app-shell";
