@@ -388,21 +388,24 @@ export function StatsScreen() {
 
   const stats = useMemo(() => {
     const filtered = filterByPeriod(invoices, period);
-    const totalCA = filtered.reduce((s, inv) => s + invoiceTotal(inv.items), 0);
-    const factureCount = filtered.length;
-    const articlesVendus = filtered.reduce(
+    const revenueInvoices = filtered.filter(
+      (inv) => inv.status === "enLivraison" || inv.status === "livree"
+    );
+    const totalCA = revenueInvoices.reduce((s, inv) => s + invoiceTotal(inv.items), 0);
+    const factureCount = revenueInvoices.length;
+    const articlesVendus = revenueInvoices.reduce(
       (s, inv) => s + invoiceTotalQuantity(inv.items),
       0
     );
     const panierMoyen = factureCount > 0 ? totalCA / factureCount : 0;
-    const plusGrosse = filtered.reduce(
+    const plusGrosse = revenueInvoices.reduce(
       (m, inv) => Math.max(m, invoiceTotal(inv.items)),
       0
     );
-    const caSeries = buildCaSeries(filtered, period);
+    const caSeries = buildCaSeries(revenueInvoices, period);
     const statusRep = buildStatusRepartition(filtered);
-    const topClients = buildTopClients(filtered);
-    const topProducts = buildTopProducts(filtered);
+    const topClients = buildTopClients(revenueInvoices);
+    const topProducts = buildTopProducts(revenueInvoices);
     return {
       filtered,
       totalCA,
@@ -488,6 +491,9 @@ export function StatsScreen() {
                   {stats.factureCount} facture
                   {stats.factureCount > 1 ? "s" : ""} · {stats.articlesVendus}{" "}
                   article{stats.articlesVendus > 1 ? "s" : ""}
+                </p>
+                <p className="mt-1 text-[11px] text-white/65">
+                  Factures en livraison ou livrées uniquement
                 </p>
               </div>
             </div>

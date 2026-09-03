@@ -6,11 +6,11 @@ Application web professionnelle (PWA installable, fonctionnant hors ligne) repro
 
 - **Authentification** par numéro de téléphone sénégalais (+221) + mot de passe
 - **Rôles** : client (accès limité), employé (factures/clients/produits), admin (accès total + maintenance + gestion des comptes)
-- **Factures** : création, modification, duplication, changement de statut, archivage, suppression
+- **Factures** : création, modification, duplication, changement de statut, suppression
 - **Calculs fidèles** : sous-total et total à payer sans TVA ni remise
 - **Statuts** : En cours (#6B4C4C), En livraison (#FFC107), Livrée (#4CAF50)
 - **Clients & Produits** : gestion complète avec catégories et images
-- **Statistiques** : chiffre d'affaires, KPIs, graphiques (bar + donut), top 5 clients/produits
+- **Statistiques** : chiffre d'affaires des factures en livraison ou livrées, KPIs, graphiques (bar + donut), top 5 clients/produits
 - **Import/Export CSV** : compatible avec l'historique de l'app mobile
 - **Génération PDF** : mise en page identique à `pdf_service.dart`
 - **Génération PNG** : pour partage WhatsApp/réseaux sociaux
@@ -237,7 +237,9 @@ Date;Réf;Client;Statut;Article;Quantité;Prix unitaire;Sous-total;Total facture
 01/09/2026 14:30;#a6jw10;Fatou Diop;En cours;Wax Hollandais;2;8000;16000;16000;
 ```
 
-L'import supporte le mapping automatique des colonnes et le choix entre "Remplacer" ou "Fusionner".
+L'import supporte le mapping automatique des colonnes et le choix entre "Remplacer" ou "Fusionner". Les clients et produits absents sont créés automatiquement, sans doublons (comparaison insensible à la casse et aux espaces), avant la création des factures.
+
+Le chiffre d'affaires affiché dans les statistiques et le tableau de bord inclut uniquement les factures `enLivraison` ou `livree`. Les factures `enCours` sont exclues jusqu'à leur livraison.
 
 ## Déploiement sur Vercel
 

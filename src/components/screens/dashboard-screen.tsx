@@ -55,9 +55,10 @@ export function DashboardScreen() {
     const todayInvoices = invoices.filter((i) => new Date(i.createdAt) >= todayStart);
     const weekInvoices = invoices.filter((i) => new Date(i.createdAt) >= weekStart);
 
-    const caToday = todayInvoices.reduce((s, i) => s + invoiceTotal(i.items), 0);
-    const caWeek = weekInvoices.reduce((s, i) => s + invoiceTotal(i.items), 0);
-    const caAll = invoices.reduce((s, i) => s + invoiceTotal(i.items), 0);
+    const isRevenue = (invoice: Invoice) => invoice.status === "enLivraison" || invoice.status === "livree";
+    const caToday = todayInvoices.filter(isRevenue).reduce((s, i) => s + invoiceTotal(i.items), 0);
+    const caWeek = weekInvoices.filter(isRevenue).reduce((s, i) => s + invoiceTotal(i.items), 0);
+    const caAll = invoices.filter(isRevenue).reduce((s, i) => s + invoiceTotal(i.items), 0);
 
     const statusCounts: Record<InvoiceStatus, number> = {
       enCours: 0,

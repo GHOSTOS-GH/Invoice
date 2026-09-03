@@ -8,6 +8,10 @@ import {
   saveInvoice,
   deleteInvoice,
   useInvoices,
+  useProducts,
+  useClients,
+  createProduct,
+  createClient,
 } from "@/lib/data-hooks";
 import { useNav } from "@/components/app-shell";
 import {
@@ -161,6 +165,8 @@ function genInvoiceId() {
 export function CsvImportScreen() {
   const { navigate } = useNav();
   const { invoices: existingInvoices, refresh } = useInvoices();
+  const { products, refresh: refreshProducts } = useProducts();
+  const { clients, refresh: refreshClients } = useClients();
 
   const [fileName, setFileName] = useState<string | null>(null);
   const [columns, setColumns] = useState<string[]>([]);
@@ -394,6 +400,55 @@ export function CsvImportScreen() {
 
       let imported = 0;
       const batchSize = 10;
+      const normalizeName = (value: string) => value.trim().replace(/\s+/g, " ").toLowerCase();
+      const uniqueNames = (values: string[]) => {
+        const seen = new Set<string>();
+        return values.map((value) => value.trim().replace(/\s+/g, " ")).filter((value) => {
+          const key = normalizeName(value);
+          if (!key || seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+      };
+      const existingProductNames = new Set(products.map((product) => normalizeName(product.name)));
+      const existingClientNames = new Set(clients.map((client) => normalizeName(client.name)));
+      const productNames = uniqueNames(groups.flatMap((group) => group.items.map((item) => item.name)))
+        .filter((name) => !existingProductNames.has(normalizeName(name)));
+      const clientNames = uniqueNames(groups.map((group) => group.clientName))
+        .filter((name) => !existingClientNames.has(normalizeName(name)));
+      let productsCreated = 0;
+      let clientsCreated = 0;
+
+      for (let start = 0; start < productNames.length; start += batchSize) {
+        const batch = productNames.slice(start, start + batchSize);
+        setProgressLabel(`Création des produits ${start + 1}-${start + batch.length}/${productNames.length}…`);
+        const results = await Promise.all(batch.map(async (name) => {
+          try {
+            await createProduct({ name, category: "Import CSV" });
+            return true;
+          } catch (error) {
+            console.error("Création produit CSV échouée", name, error);
+            return false;
+          }
+        }));
+        productsCreated += results.filter(Boolean).length;
+      }
+      for (let start = 0; start < clientNames.length; start += batchSize) {
+        const batch = clientNames.slice(start, start + batchSize);
+        setProgressLabel(`Création des clients ${start + 1}-${start + batch.length}/${clientNames.length}…`);
+        const results = await Promise.all(batch.map(async (name) => {
+          try {
+            await createClient({ name });
+            return true;
+          } catch (error) {
+            console.error("Création client CSV échouée", name, error);
+            return false;
+          }
+        }));
+        clientsCreated += results.filter(Boolean).length;
+      }
+      await Promise.all([refreshProducts(), refreshClients()]);
+
       for (let start = 0; start < groups.length; start += batchSize) {
         const batch = groups.slice(start, start + batchSize);
         setProgressLabel(`Création des factures ${start + 1}-${start + batch.length}/${groups.length}…`);
@@ -421,7 +476,7 @@ export function CsvImportScreen() {
       setProgressLabel("Terminé");
       await refresh();
       toast.success(
-        `${imported} facture(s) importée(s) · ${totalItems} article(s)`
+        `${productsCreated} produit(s) créé(s), ${clientsCreated} client(s) créé(s), ${imported} facture(s) importée(s)`
       );
       navigate("invoices");
     } catch (err: any) {

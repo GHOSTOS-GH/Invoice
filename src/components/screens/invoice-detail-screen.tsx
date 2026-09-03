@@ -68,7 +68,8 @@ export function InvoiceDetailScreen({ invoiceId }: { invoiceId?: string }) {
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [loading, setLoading] = useState(true);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [generating, setGenerating] = useState<"pdf" | "png" | null>(null);
+  const [generating, setGenerating] = useState<"pdf" | "png" | "jpg" | null>(null);
+  const [shareChoiceOpen, setShareChoiceOpen] = useState(false);
   const invoiceRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -124,6 +125,7 @@ export function InvoiceDetailScreen({ invoiceId }: { invoiceId?: string }) {
         status: "enCours",
         notes: invoice.notes,
         items: invoice.items.map((it) => ({
+          id: `item_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
           name: it.name,
           quantity: it.quantity,
           unitPrice: it.unitPrice,
@@ -191,14 +193,55 @@ export function InvoiceDetailScreen({ invoiceId }: { invoiceId?: string }) {
     }
   };
 
-  const handleShare = async () => {
+  const generateImageBlob = async (type: "image/png" | "image/jpeg") => {
+    if (!invoiceRef.current) throw new Error("Facture non disponible");
+    const html2canvas = (await import("html2canvas")).default;
+    const canvas = await html2canvas(invoiceRef.current, {
+      scale: 2,
+      backgroundColor: "#ffffff",
+      useCORS: true,
+      logging: false,
+    });
+    return new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("Conversion image échouée"))), type, type === "image/jpeg" ? 0.92 : undefined);
+    });
+  };
+
+  const handleJpg = async () => {
     if (!invoice) return;
+    setGenerating("jpg");
     try {
-      const blob = await generateInvoicePdf(invoice);
+      const blob = await generateImageBlob("image/jpeg");
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `facture_${invoice.clientName.replace(/\s+/g, "_")}_${refId(invoice.id).slice(1)}.jpg`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success("Image JPG générée");
+    } catch (e: any) {
+      toast.error("Erreur génération JPG: " + e.message);
+    } finally {
+      setGenerating(null);
+    }
+  };
+
+  const handleShare = () => {
+    setShareChoiceOpen(true);
+  };
+
+  const shareAs = async (format: "pdf" | "jpg") => {
+    if (!invoice) return;
+    setShareChoiceOpen(false);
+    setGenerating(format === "pdf" ? "pdf" : "jpg");
+    try {
+      const blob = format === "pdf"
+        ? await generateInvoicePdf(invoice)
+        : await generateImageBlob("image/jpeg");
       const file = new File(
         [blob],
-        `facture_${invoice.clientName.replace(/\s+/g, "_")}.pdf`,
-        { type: "application/pdf" }
+        `facture_${invoice.clientName.replace(/\s+/g, "_")}.${format}`,
+        { type: format === "pdf" ? "application/pdf" : "image/jpeg" }
       );
       if (navigator.share && navigator.canShare?.({ files: [file] })) {
         await navigator.share({
@@ -207,10 +250,18 @@ export function InvoiceDetailScreen({ invoiceId }: { invoiceId?: string }) {
           text: `Facture ${refId(invoice.id)} – ${formatCurrency(invoicePayableTotal(invoice))}`,
         });
       } else {
-        handlePdf();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = file.name;
+        a.click();
+        URL.revokeObjectURL(url);
+        toast.success("Fichier téléchargé");
       }
     } catch (e: any) {
       if (e.name !== "AbortError") toast.error("Partage échoué");
+    } finally {
+      setGenerating(null);
     }
   };
 
@@ -259,6 +310,9 @@ export function InvoiceDetailScreen({ invoiceId }: { invoiceId?: string }) {
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={handlePng} disabled={generating !== null}>
                   <ImageIcon className="w-4 h-4 mr-2" /> Télécharger PNG
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleJpg} disabled={generating !== null}>
+                  <ImageIcon className="w-4 h-4 mr-2" /> Télécharger JPG
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={handleShare} disabled={generating !== null}>
                   <Share2 className="w-4 h-4 mr-2" /> Partager
@@ -316,6 +370,14 @@ export function InvoiceDetailScreen({ invoiceId }: { invoiceId?: string }) {
             <span className="text-[11px] font-medium text-slate-600">PDF</span>
           </button>
           <button
+            onClick={handleJpg}
+            disabled={generating !== null}
+            className="flex flex-col items-center gap-1.5 py-3 bg-white rounded-xl border border-slate-200 hover:border-[#2563EB] hover:bg-blue-50/50 transition-all disabled:opacity-50"
+          >
+            {generating === "jpg" ? <Loader2 className="w-5 h-5 text-[#2563EB] animate-spin" /> : <ImageIcon className="w-5 h-5 text-[#2563EB]" />}
+            <span className="text-[11px] font-medium text-slate-600">Image JPG</span>
+          </button>
+          <button
             onClick={handlePng}
             disabled={generating !== null}
             className="flex flex-col items-center gap-1.5 py-3 bg-white rounded-xl border border-slate-200 hover:border-[#2563EB] hover:bg-blue-50/50 transition-all disabled:opacity-50"
@@ -357,6 +419,19 @@ export function InvoiceDetailScreen({ invoiceId }: { invoiceId?: string }) {
             <AlertDialogAction onClick={handleDelete} className="bg-red-600 hover:bg-red-700">
               Supprimer
             </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog open={shareChoiceOpen} onOpenChange={setShareChoiceOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Choisir le format de partage</AlertDialogTitle>
+            <AlertDialogDescription>Choisissez le fichier à envoyer.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Annuler</AlertDialogCancel>
+            <AlertDialogAction onClick={() => shareAs("pdf")}>Partager en PDF</AlertDialogAction>
+            <AlertDialogAction onClick={() => shareAs("jpg")} className="bg-slate-700 hover:bg-slate-800">Partager en image (JPG)</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
