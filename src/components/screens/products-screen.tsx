@@ -66,7 +66,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import Papa from "papaparse";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import type { Product } from "@/lib/types";
@@ -444,9 +443,9 @@ export function ProductsScreen() {
     toast.success("Produits exportés en CSV");
   };
 
-  const handleExportExcel = () => {
+  const handleExportExcel = async () => {
     const date = new Date().toISOString().slice(0, 10);
-    exportExcel(productsToRows(products), `produits_${date}.xlsx`, "Produits");
+    await exportExcel(productsToRows(products), `produits_${date}.xlsx`, "Produits");
     toast.success("Produits exportés en Excel");
   };
 
@@ -454,10 +453,11 @@ export function ProductsScreen() {
     fileInputRef.current?.click();
   };
 
-  const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setImporting(true);
+    const Papa = (await import("papaparse")).default;
     Papa.parse(file, {
       header: true,
       skipEmptyLines: true,

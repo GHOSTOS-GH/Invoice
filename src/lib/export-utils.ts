@@ -1,7 +1,6 @@
 // Shared export utilities — CSV (semicolon, French) + Excel (.xlsx via SheetJS).
 // Format is compatible with the CSV import screen for round-trip export → reimport.
 
-import * as XLSX from "xlsx";
 import { escapeCsv, numStr } from "./formatters";
 
 /** Trigger a browser download for a Blob. */
@@ -31,11 +30,12 @@ export function exportCsv(rows: (string | number)[][], filename: string) {
 }
 
 /** Export rows as an Excel .xlsx file download. */
-export function exportExcel(
+export async function exportExcel(
   rows: (string | number)[][],
   filename: string,
   sheetName = "Données"
 ) {
+  const XLSX = await import("xlsx");
   const ws = XLSX.utils.aoa_to_sheet(rows);
   // Set column widths based on content
   const colWidths = rows[0]?.map((_, colIdx) => {

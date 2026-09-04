@@ -2,7 +2,7 @@
 // Dashboard / home overview — welcome card, quick KPIs, recent invoices,
 // status distribution, and quick action shortcuts.
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useInvoices, useProducts, useClients } from "@/lib/data-hooks";
 import { useAuth } from "@/lib/auth-context";
 import { useNav } from "@/components/app-shell";
@@ -45,27 +45,25 @@ export function DashboardScreen() {
   const { clients } = useClients();
   const { user } = useAuth();
   const { navigate } = useNav();
+  const [aggregate, setAggregate] = useState<any>(null);
+
+  useEffect(() => {
+    Promise.all(["day", "week", "all"].map((period) => fetch(`/api/stats/aggregate?period=${period}`, { cache: "no-store" }).then((res) => res.json())))
+      .then(([day, week, all]) => setAggregate({ day, week, all }))
+      .catch(() => undefined);
+  }, []);
 
   const stats = useMemo(() => {
-    const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const weekStart = new Date(todayStart);
-    weekStart.setDate(weekStart.getDate() - 6);
-
-    const todayInvoices = invoices.filter((i) => new Date(i.createdAt) >= todayStart);
-    const weekInvoices = invoices.filter((i) => new Date(i.createdAt) >= weekStart);
-
-    const isRevenue = (invoice: Invoice) => invoice.status === "enLivraison" || invoice.status === "livree";
-    const caToday = todayInvoices.filter(isRevenue).reduce((s, i) => s + invoiceTotal(i.items), 0);
-    const caWeek = weekInvoices.filter(isRevenue).reduce((s, i) => s + invoiceTotal(i.items), 0);
-    const caAll = invoices.filter(isRevenue).reduce((s, i) => s + invoiceTotal(i.items), 0);
+    const caToday = aggregate?.day?.totalCA ?? 0;
+    const caWeek = aggregate?.week?.totalCA ?? 0;
+    const caAll = aggregate?.all?.totalCA ?? 0;
 
     const statusCounts: Record<InvoiceStatus, number> = {
       enCours: 0,
       enLivraison: 0,
       livree: 0,
     };
-    for (const inv of invoices) statusCounts[inv.status]++;
+    for (const item of aggregate?.all?.statusRep ?? []) statusCounts[item.status] = item.count;
 
     const recent = [...invoices]
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
@@ -75,12 +73,12 @@ export function DashboardScreen() {
       caToday,
       caWeek,
       caAll,
-      todayCount: todayInvoices.length,
-      weekCount: weekInvoices.length,
+      todayCount: aggregate?.day?.factureCount ?? 0,
+      weekCount: aggregate?.week?.factureCount ?? 0,
       statusCounts,
       recent,
     };
-  }, [invoices]);
+  }, [aggregate, invoices]);
 
   const greeting = useMemo(() => {
     const h = new Date().getHours();
@@ -184,7 +182,7 @@ export function DashboardScreen() {
                   {formatCurrency(stats.caAll)}
                 </p>
                 <p className="text-[10px] sm:text-[11px] text-white/60 mt-0.5">
-                  {invoices.length} au total
+                  {aggregate?.all?.factureCount ?? 0} au total
                 </p>
               </div>
             </div>
@@ -394,16 +392,13 @@ export function DashboardScreen() {
                 <CatalogStat
                   icon={ReceiptText}
                   label="Factures"
-                  value={invoices.length}
+                  value={aggregate?.all?.factureCount ?? 0}
                   color="#2563EB"
                 />
                 <CatalogStat
                   icon={ShoppingBag}
                   label="Articles vendus"
-                  value={invoices.reduce(
-                    (s, i) => s + invoiceTotalQuantity(i.items),
-                    0
-                  )}
+                  value={aggregate?.all?.articlesVendus ?? 0}
                   color="#6366F1"
                 />
               </div>

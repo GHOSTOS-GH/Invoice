@@ -3,7 +3,6 @@
 // replace/merge choice, validation summary, progress + import via saveInvoice.
 
 import { useCallback, useMemo, useRef, useState } from "react";
-import Papa from "papaparse";
 import {
   saveInvoice,
   deleteInvoice,
@@ -52,6 +51,8 @@ import { INVOICE_STATUSES, type InvoiceStatus } from "@/lib/constants";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import type { Invoice, InvoiceItem } from "@/lib/types";
+import { invoiceTotal } from "@/lib/types";
+import { refId } from "@/lib/formatters";
 
 // ---------- Field definitions ----------
 
@@ -158,13 +159,17 @@ function genItemId() {
   return `item_csv_${Date.now().toString(36)}_${_importItemCounter}`;
 }
 
-function genInvoiceId() {
+function genInvoiceId(reference?: string) {
+  if (reference && !reference.startsWith("auto_")) {
+    const safeReference = reference.trim().replace(/[^a-zA-Z0-9_-]/g, "_");
+    return `csv_${safeReference}`;
+  }
   return `inv_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
 export function CsvImportScreen() {
   const { navigate } = useNav();
-  const { invoices: existingInvoices, refresh } = useInvoices();
+  const { invoices: existingInvoices, refresh } = useInvoices({ all: true });
   const { products, refresh: refreshProducts } = useProducts();
   const { clients, refresh: refreshClients } = useClients();
 
@@ -219,7 +224,7 @@ export function CsvImportScreen() {
   }, []);
 
   const handleFile = useCallback(
-    (file: File) => {
+    async (file: File) => {
       if (!file.name.toLowerCase().endsWith(".csv") && file.type !== "text/csv") {
         toast.error("Veuillez sélectionner un fichier .csv");
         return;
@@ -227,6 +232,7 @@ export function CsvImportScreen() {
       setParsing(true);
       setParseError(null);
       setFileName(file.name);
+      const Papa = (await import("papaparse")).default;
       Papa.parse<ParsedRow>(file, {
         header: true,
         skipEmptyLines: true,
@@ -401,6 +407,33 @@ export function CsvImportScreen() {
       let imported = 0;
       const batchSize = 10;
       const normalizeName = (value: string) => value.trim().replace(/\s+/g, " ").toLowerCase();
+      const normalizeRef = (value: string) => value.trim().replace(/^#/, "").replace(/^csv_/, "").toLowerCase();
+      const fallbackKey = (clientName: string, createdAt: string, totalAmount: number) =>
+        `${normalizeName(clientName)}|${createdAt.slice(0, 10)}|${totalAmount.toFixed(2)}`;
+      const existingImportKeys = new Set<string>();
+      for (const invoice of existingInvoices) {
+        existingImportKeys.add(`ref:${normalizeRef(invoice.id)}`);
+        existingImportKeys.add(`ref:${normalizeRef(refId(invoice.id))}`);
+        existingImportKeys.add(fallbackKey(invoice.clientName, invoice.createdAt, invoiceTotal(invoice.items)));
+      }
+      let skippedDuplicates = 0;
+      const importGroups = groups.filter((group) => {
+        const amount = group.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+        const hasReference = group.ref && !group.ref.startsWith("auto_");
+        const key = hasReference
+          ? `ref:${normalizeRef(group.ref)}`
+          : fallbackKey(group.clientName, group.createdAt, amount);
+        if (mode !== "replace" && existingImportKeys.has(key)) {
+          skippedDuplicates++;
+          return false;
+        }
+        if (existingImportKeys.has(key)) {
+          skippedDuplicates++;
+          return false;
+        }
+        existingImportKeys.add(key);
+        return true;
+      });
       const uniqueNames = (values: string[]) => {
         const seen = new Set<string>();
         return values.map((value) => value.trim().replace(/\s+/g, " ")).filter((value) => {
@@ -412,9 +445,9 @@ export function CsvImportScreen() {
       };
       const existingProductNames = new Set(products.map((product) => normalizeName(product.name)));
       const existingClientNames = new Set(clients.map((client) => normalizeName(client.name)));
-      const productNames = uniqueNames(groups.flatMap((group) => group.items.map((item) => item.name)))
+      const productNames = uniqueNames(importGroups.flatMap((group) => group.items.map((item) => item.name)))
         .filter((name) => !existingProductNames.has(normalizeName(name)));
-      const clientNames = uniqueNames(groups.map((group) => group.clientName))
+      const clientNames = uniqueNames(importGroups.map((group) => group.clientName))
         .filter((name) => !existingClientNames.has(normalizeName(name)));
       let productsCreated = 0;
       let clientsCreated = 0;
@@ -449,13 +482,13 @@ export function CsvImportScreen() {
       }
       await Promise.all([refreshProducts(), refreshClients()]);
 
-      for (let start = 0; start < groups.length; start += batchSize) {
-        const batch = groups.slice(start, start + batchSize);
-        setProgressLabel(`Création des factures ${start + 1}-${start + batch.length}/${groups.length}…`);
+      for (let start = 0; start < importGroups.length; start += batchSize) {
+        const batch = importGroups.slice(start, start + batchSize);
+        setProgressLabel(`Création des factures ${start + 1}-${start + batch.length}/${importGroups.length}…`);
         const results = await Promise.all(batch.map(async (g) => {
           const items: InvoiceItem[] = g.items.map((it) => ({ id: genItemId(), name: it.name, quantity: it.quantity, unitPrice: it.unitPrice }));
           const invoice: Partial<Invoice> & { id: string; clientName: string; items: InvoiceItem[] } = {
-            id: genInvoiceId(), clientName: g.clientName, status: g.status, notes: g.notes || null,
+            id: genInvoiceId(g.ref), clientName: g.clientName, status: g.status, notes: g.notes || null,
             items, createdAt: g.createdAt, updatedAt: new Date().toISOString(),
           };
           try {
@@ -476,7 +509,7 @@ export function CsvImportScreen() {
       setProgressLabel("Terminé");
       await refresh();
       toast.success(
-        `${productsCreated} produit(s) créé(s), ${clientsCreated} client(s) créé(s), ${imported} facture(s) importée(s)`
+        `${productsCreated} produit(s) créé(s), ${clientsCreated} client(s) créé(s), ${imported} facture(s) importée(s), ${skippedDuplicates} ignorée(s) car déjà présente(s)`
       );
       navigate("invoices");
     } catch (err: any) {

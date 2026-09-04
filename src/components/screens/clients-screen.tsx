@@ -2,10 +2,9 @@
 // Clients management — list, add, edit, delete, and per-client invoice history.
 // Matches the Flutter app's settings "Clients" tab but as a full screen.
 
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import {
   useClients,
-  useInvoices,
   createClient,
   saveClient,
   deleteClient,
@@ -60,7 +59,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import Papa from "papaparse";
 import { formatCurrency, formatDate, formatDateTime, refId } from "@/lib/formatters";
 import { invoiceTotal, invoicePayableTotal } from "@/lib/types";
 import type { Client, Invoice } from "@/lib/types";
@@ -73,7 +71,6 @@ import {
 
 export function ClientsScreen() {
   const { clients, loading, refresh } = useClients();
-  const { invoices } = useInvoices();
   const { navigate } = useNav();
   const [search, setSearch] = useState("");
   const [editing, setEditing] = useState<Client | null>(null);
@@ -81,6 +78,7 @@ export function ClientsScreen() {
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Client | null>(null);
   const [importing, setImporting] = useState(false);
+  const [selectedInvoices, setSelectedInvoices] = useState<Invoice[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleExportCsv = () => {
@@ -89,9 +87,9 @@ export function ClientsScreen() {
     toast.success("Clients exportés en CSV");
   };
 
-  const handleExportExcel = () => {
+  const handleExportExcel = async () => {
     const date = new Date().toISOString().slice(0, 10);
-    exportExcel(clientsToRows(clients), `clients_${date}.xlsx`, "Clients");
+    await exportExcel(clientsToRows(clients), `clients_${date}.xlsx`, "Clients");
     toast.success("Clients exportés en Excel");
   };
 
@@ -99,10 +97,11 @@ export function ClientsScreen() {
     fileInputRef.current?.click();
   };
 
-  const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setImporting(true);
+    const Papa = (await import("papaparse")).default;
     Papa.parse(file, {
       header: true,
       skipEmptyLines: true,
@@ -138,19 +137,16 @@ export function ClientsScreen() {
     });
   };
 
-  // Map clientName → invoices (history) + totals
-  const clientStats = useMemo(() => {
-    const map = new Map<string, { count: number; total: number; invoices: Invoice[] }>();
-    for (const inv of invoices) {
-      const key = inv.clientName.toLowerCase();
-      const existing = map.get(key) || { count: 0, total: 0, invoices: [] };
-      existing.count++;
-      existing.total += invoiceTotal(inv.items);
-      existing.invoices.push(inv);
-      map.set(key, existing);
+  useEffect(() => {
+    if (!selectedClient) {
+      setSelectedInvoices([]);
+      return;
     }
-    return map;
-  }, [invoices]);
+    fetch(`/api/clients/${selectedClient.id}/invoices?page=1&pageSize=20`, { cache: "no-store" })
+      .then((res) => res.json())
+      .then((data) => setSelectedInvoices(data.invoices ?? []))
+      .catch(() => setSelectedInvoices([]));
+  }, [selectedClient]);
 
   const filtered = useMemo(() => {
     if (!search.trim()) return clients;
@@ -304,10 +300,7 @@ export function ClientsScreen() {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {filtered.map((client) => {
-              const stats = clientStats.get(client.name.toLowerCase()) || {
-                count: 0,
-                total: 0,
-              };
+              const stats = { count: 0, total: 0 };
               const initials = client.name
                 .trim()
                 .split(/\s+/)
@@ -431,11 +424,7 @@ export function ClientsScreen() {
       {/* History dialog */}
       <ClientHistoryDialog
         client={selectedClient}
-        invoices={
-          selectedClient
-            ? clientStats.get(selectedClient.name.toLowerCase())?.invoices || []
-            : []
-        }
+        invoices={selectedInvoices}
         onClose={() => setSelectedClient(null)}
         onOpenInvoice={(id) => {
           setSelectedClient(null);

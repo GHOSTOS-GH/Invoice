@@ -1,8 +1,6 @@
 // PDF generation with jsPDF — reproduces lib/services/pdf_service.dart layout:
 // header, status badge, client box, items table, gradient total box, notes, footer.
 
-import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
 import type { Invoice } from "./types";
 import {
   invoiceTotal,
@@ -34,6 +32,8 @@ function hexToRgb(hex: string): [number, number, number] {
 }
 
 export async function generateInvoicePdf(invoice: Invoice): Promise<Blob> {
+  const { default: jsPDF } = await import("jspdf");
+  const { default: autoTable } = await import("jspdf-autotable");
   const doc = new jsPDF({ unit: "pt", format: "a4" });
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();

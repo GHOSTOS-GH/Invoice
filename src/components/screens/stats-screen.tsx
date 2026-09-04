@@ -3,8 +3,7 @@
 // Period selector, CA hero, 4 KPI cards, CA evolution bar chart,
 // status répartition donut chart, Top 5 clients, Top 5 produits.
 
-import { useState, useMemo, useCallback } from "react";
-import { useInvoices } from "@/lib/data-hooks";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import {
   ScreenHeader,
   EmptyState,
@@ -370,58 +369,45 @@ function StatsSkeleton() {
 // ---------- Main screen ----------
 
 export function StatsScreen() {
-  const { invoices, loading, refresh } = useInvoices();
   const [period, setPeriod] = useState<Period>("week");
+  const [stats, setStats] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
+  const loadStats = useCallback(async () => {
+    const res = await fetch(`/api/stats/aggregate?period=${period}`, { cache: "no-store" });
+    if (!res.ok) throw new Error("Impossible de charger les statistiques");
+    const data = await res.json();
+    setStats({
+      ...data,
+      statusRep: data.statusRep.map((item: any) => ({
+        status: item.status,
+        label: INVOICE_STATUS_META[item.status as keyof typeof INVOICE_STATUS_META]?.label ?? item.status,
+        color: INVOICE_STATUS_META[item.status as keyof typeof INVOICE_STATUS_META]?.color ?? "#64748B",
+        value: item.total,
+      })),
+    });
+  }, [period]);
+
+  useEffect(() => {
+    setLoading(true);
+    loadStats().catch(() => toast.error("Impossible de charger les statistiques")).finally(() => setLoading(false));
+  }, [loadStats]);
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      await refresh();
+      await loadStats();
       toast.success("Statistiques actualisées");
     } catch {
       toast.error("Impossible d'actualiser les statistiques");
     } finally {
       setRefreshing(false);
     }
-  }, [refresh]);
+  }, [loadStats]);
 
-  const stats = useMemo(() => {
-    const filtered = filterByPeriod(invoices, period);
-    const revenueInvoices = filtered.filter(
-      (inv) => inv.status === "enLivraison" || inv.status === "livree"
-    );
-    const totalCA = revenueInvoices.reduce((s, inv) => s + invoiceTotal(inv.items), 0);
-    const factureCount = revenueInvoices.length;
-    const articlesVendus = revenueInvoices.reduce(
-      (s, inv) => s + invoiceTotalQuantity(inv.items),
-      0
-    );
-    const panierMoyen = factureCount > 0 ? totalCA / factureCount : 0;
-    const plusGrosse = revenueInvoices.reduce(
-      (m, inv) => Math.max(m, invoiceTotal(inv.items)),
-      0
-    );
-    const caSeries = buildCaSeries(revenueInvoices, period);
-    const statusRep = buildStatusRepartition(filtered);
-    const topClients = buildTopClients(revenueInvoices);
-    const topProducts = buildTopProducts(revenueInvoices);
-    return {
-      filtered,
-      totalCA,
-      factureCount,
-      articlesVendus,
-      panierMoyen,
-      plusGrosse,
-      caSeries,
-      statusRep,
-      topClients,
-      topProducts,
-    };
-  }, [invoices, period]);
-
-  const maxClient = stats.topClients[0]?.value ?? 0;
-  const maxProduct = stats.topProducts[0]?.value ?? 0;
+  const maxClient = stats?.topClients[0]?.value ?? 0;
+  const maxProduct = stats?.topProducts[0]?.value ?? 0;
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50">
@@ -448,7 +434,7 @@ export function StatsScreen() {
       <main className="flex-1 px-4 sm:px-6 py-4 space-y-4">
         {loading ? (
           <StatsSkeleton />
-        ) : invoices.length === 0 ? (
+        ) : !stats || (stats.factureCount === 0 && stats.statusRep.length === 0) ? (
           <EmptyState
             icon={BarChart3}
             title="Aucune donnée à afficher"
@@ -587,7 +573,6 @@ export function StatsScreen() {
                         maxBarSize={
                           period === "all" ? 40 : period === "week" ? 32 : 14
                         }
-                        accessibilityLayer
                       />
                     </BarChart>
                   </ResponsiveContainer>
@@ -615,7 +600,6 @@ export function StatsScreen() {
                             outerRadius={78}
                             paddingAngle={2}
                             stroke="none"
-                            accessibilityLayer
                           >
                             {stats.statusRep.map((entry) => (
                               <Cell

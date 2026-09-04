@@ -61,7 +61,6 @@ import {
 import type { Invoice } from "@/lib/types";
 import { saveInvoice, deleteInvoice } from "@/lib/data-hooks";
 import { toast } from "sonner";
-import { generateInvoicePdf } from "@/lib/pdf-generator";
 
 export function InvoiceDetailScreen({ invoiceId }: { invoiceId?: string }) {
   const { navigate } = useNav();
@@ -150,6 +149,7 @@ export function InvoiceDetailScreen({ invoiceId }: { invoiceId?: string }) {
     if (!invoice) return;
     setGenerating("pdf");
     try {
+      const { generateInvoicePdf } = await import("@/lib/pdf-generator");
       const blob = await generateInvoicePdf(invoice);
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -236,7 +236,7 @@ export function InvoiceDetailScreen({ invoiceId }: { invoiceId?: string }) {
     setGenerating(format === "pdf" ? "pdf" : "jpg");
     try {
       const blob = format === "pdf"
-        ? await generateInvoicePdf(invoice)
+        ? await (await import("@/lib/pdf-generator")).generateInvoicePdf(invoice)
         : await generateImageBlob("image/jpeg");
       const file = new File(
         [blob],

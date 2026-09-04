@@ -61,6 +61,8 @@ SUPABASE_SERVICE_ROLE_KEY="<CLE_SERVICE_ROLE_SUPABASE>"
 Copier les deux URLs depuis le tableau de bord Supabase. Ne jamais commiter `.env` ni le mot de passe réel.
 `SUPABASE_SERVICE_ROLE_KEY` est une clé serveur strictement privée : elle est nécessaire pour envoyer les images vers le bucket `product-images` et ne doit jamais commencer par `NEXT_PUBLIC_`.
 
+Avant le déploiement, créer manuellement dans Supabase Storage un bucket public nommé `product-images`. L'API Next.js utilise `SUPABASE_SERVICE_ROLE_KEY` pour écrire dans ce bucket et ne tente pas de le créer à chaque upload.
+
 Le fichier `.env` est déjà exclu du dépôt par `.gitignore`. Pour vérifier qu'il est bien ignoré :
 
 ```bash
@@ -240,6 +242,8 @@ Date;Réf;Client;Statut;Article;Quantité;Prix unitaire;Sous-total;Total facture
 L'import supporte le mapping automatique des colonnes et le choix entre "Remplacer" ou "Fusionner". Les clients et produits absents sont créés automatiquement, sans doublons (comparaison insensible à la casse et aux espaces), avant la création des factures.
 
 Le chiffre d'affaires affiché dans les statistiques et le tableau de bord inclut uniquement les factures `enLivraison` ou `livree`. Les factures `enCours` sont exclues jusqu'à leur livraison.
+
+La liste des factures est chargée par pages de 30 avec le bouton **Charger plus**. Le tableau de bord et les statistiques utilisent explicitement le chargement complet nécessaire à leurs agrégats. Les exports Excel/SheetJS et PapaParse sont chargés uniquement lorsque l'action correspondante est utilisée.
 
 ## Déploiement sur Vercel
 

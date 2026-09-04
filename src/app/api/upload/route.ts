@@ -16,17 +16,6 @@ function storageConfig() {
   return { supabaseUrl: supabaseUrl.replace(/\/$/, ""), serviceKey };
 }
 
-async function ensureBucket(supabaseUrl: string, serviceKey: string) {
-  const response = await fetch(`${supabaseUrl}/storage/v1/bucket`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${serviceKey}`, apikey: serviceKey, "Content-Type": "application/json" },
-    body: JSON.stringify({ id: BUCKET, name: BUCKET, public: true }),
-  });
-  if (!response.ok && response.status !== 400 && response.status !== 409) {
-    throw new Error("Impossible de créer le bucket Supabase");
-  }
-}
-
 export async function POST(req: Request) {
   try {
     await requireAuth();
@@ -61,7 +50,6 @@ export async function POST(req: Request) {
       return Response.json({ error: "Image trop volumineuse (5 Mo maximum)" }, { status: 413 });
     }
 
-    await ensureBucket(supabaseUrl, serviceKey);
     const extension = contentType.split("/")[1].replace("jpeg", "jpg");
     const path = `${new Date().toISOString().slice(0, 10)}/${randomUUID()}.${extension}`;
     const upload = await fetch(`${supabaseUrl}/storage/v1/object/${BUCKET}/${path}`, {

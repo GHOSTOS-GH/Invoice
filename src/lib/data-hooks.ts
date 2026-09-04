@@ -21,27 +21,34 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 
 // ---------- Invoices ----------
 
-export function useInvoices() {
+export function useInvoices(options: { all?: boolean } = {}) {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { online } = useSyncStatus();
   const hasData = useRef(false);
+  const [hasMore, setHasMore] = useState(true);
+  const pageRef = useRef(1);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (nextPage = 1, append = false) => {
     setLoading(!hasData.current);
     setError(null);
     try {
       if (navigator.onLine) {
-        const data = await api<Invoice[]>("/api/invoices");
-        setInvoices(data);
+        const query = options.all ? "?all=true" : `?page=${nextPage}&pageSize=30`;
+        const result = await api<{ invoices: Invoice[]; pagination: { hasMore: boolean } }>(`/api/invoices${query}`);
+        setInvoices((current) => append ? [...current, ...result.invoices] : result.invoices);
+        setHasMore(result.pagination.hasMore);
+        pageRef.current = nextPage;
         hasData.current = true;
         // Cache locally
         try {
           const db = getDB();
-          await db.invoices.clear();
-          await db.invoiceItems.clear();
-          for (const inv of data) {
+          if (!append) {
+            await db.invoices.clear();
+            await db.invoiceItems.clear();
+          }
+          for (const inv of result.invoices) {
             const { items, ...invData } = inv;
             await db.invoices.put(invData as any);
             if (items) for (const it of items) await db.invoiceItems.put(it);
@@ -77,7 +84,7 @@ export function useInvoices() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [options.all]);
 
   useEffect(() => {
     load();
@@ -98,7 +105,11 @@ export function useInvoices() {
     };
   }, [load, online]);
 
-  return { invoices, loading, error, refresh: load };
+  const loadMore = useCallback(() => {
+    if (!options.all && hasMore && !loading) return load(pageRef.current + 1, true);
+  }, [hasMore, loading, load, options.all]);
+
+  return { invoices, loading, error, hasMore, loadMore, refresh: () => load(1, false) };
 }
 
 export async function saveInvoice(

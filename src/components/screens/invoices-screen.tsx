@@ -87,7 +87,7 @@ const SORT_LABELS: Record<SortOption, string> = {
 };
 
 export function InvoicesScreen() {
-  const { invoices, loading, refresh } = useInvoices();
+  const { invoices, loading, refresh, hasMore, loadMore } = useInvoices();
   const { navigate } = useNav();
   const [search, setSearch] = useState("");
   const [filters, setFilters] = useState<Set<InvoiceStatus>>(new Set());
@@ -171,7 +171,7 @@ export function InvoicesScreen() {
   const clearSelection = () => setSelected(new Set());
 
   const exportInvoices = useCallback(
-    (format: "csv" | "excel") => {
+    async (format: "csv" | "excel") => {
       const toExport =
         selected.size > 0 ? filtered.filter((i) => selected.has(i.id)) : filtered;
       if (toExport.length === 0) {
@@ -184,7 +184,7 @@ export function InvoicesScreen() {
         exportCsv(rows, `factures_${date}.csv`);
         toast.success(`${toExport.length} facture(s) exportée(s) en CSV`);
       } else {
-        exportExcel(rows, `factures_${date}.xlsx`, "Factures");
+        await exportExcel(rows, `factures_${date}.xlsx`, "Factures");
         toast.success(`${toExport.length} facture(s) exportée(s) en Excel`);
       }
       setSelectionMode(false);
@@ -554,6 +554,14 @@ export function InvoicesScreen() {
                 }}
               />
             ))}
+            {hasMore && (
+              <div className="flex justify-center pt-2">
+                <Button variant="outline" onClick={loadMore} disabled={loading} className="rounded-xl">
+                  {loading ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : null}
+                  Charger plus
+                </Button>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -623,7 +631,7 @@ function InvoiceCard({
     const touch = event.changedTouches[0];
     const dx = touch.clientX - touchStart.current.x;
     const dy = touch.clientY - touchStart.current.y;
-    if (Math.abs(dx) > 80 && Math.abs(dx) > Math.abs(dy) * 1.3) {
+    if (Math.abs(dx) > 115 && Math.abs(dx) > Math.abs(dy) * 1.5) {
       setSwipe(dx < 0 ? "left" : "right");
     }
   };
