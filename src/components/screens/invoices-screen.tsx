@@ -274,9 +274,9 @@ export function InvoicesScreen() {
         }
       />
 
-      <div className="p-4 sm:p-6 space-y-4">
+      <div className="p-4 sm:p-6 space-y-6 max-w-5xl mx-auto">
         {/* Search + actions bar */}
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="bg-white rounded-2xl border border-slate-200 p-3 sm:p-4 shadow-sm flex flex-wrap items-center gap-2">
           <div className="relative flex-1 min-w-[200px]">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             <Input
@@ -384,7 +384,7 @@ export function InvoicesScreen() {
         </div>
 
         {/* Status filter chips */}
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 px-1">
           <span className="text-[12px] font-medium text-slate-400 flex items-center gap-1">
             <Filter className="w-3.5 h-3.5" /> Filtres :
           </span>
@@ -421,7 +421,7 @@ export function InvoicesScreen() {
         </div>
 
         {/* Date range filter */}
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 px-1">
           <span className="text-[12px] font-medium text-slate-400 flex items-center gap-1">
             <CalendarDays className="w-3.5 h-3.5" /> Période :
           </span>
@@ -481,7 +481,7 @@ export function InvoicesScreen() {
         {/* Summary stats for the active filter */}
         {!loading && filtered.length > 0 && (
           <div className="grid grid-cols-3 gap-3">
-            <div className="bg-white rounded-xl border border-slate-200 p-3 sm:p-4">
+            <div className="bg-white rounded-2xl border border-slate-200 p-3 sm:p-4 shadow-sm">
               <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide mb-1">
                 Factures
               </p>
@@ -489,7 +489,7 @@ export function InvoicesScreen() {
                 {summary.count}
               </p>
             </div>
-            <div className="bg-white rounded-xl border border-slate-200 p-3 sm:p-4">
+            <div className="bg-white rounded-2xl border border-slate-200 p-3 sm:p-4 shadow-sm">
               <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide mb-1">
                 Total
               </p>
@@ -497,7 +497,7 @@ export function InvoicesScreen() {
                 {formatCurrency(summary.totalPayable)}
               </p>
             </div>
-            <div className="bg-white rounded-xl border border-slate-200 p-3 sm:p-4">
+            <div className="bg-white rounded-2xl border border-slate-200 p-3 sm:p-4 shadow-sm">
               <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide mb-1">
                 Articles
               </p>

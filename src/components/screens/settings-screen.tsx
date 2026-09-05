@@ -15,6 +15,7 @@ import {
   uploadImage,
 } from "@/lib/data-hooks";
 import { clearAllLocal, countPendingSync, getDB } from "@/lib/offline-db";
+import { useSyncStatus } from "@/components/shared/sync-status";
 import { useNav } from "@/components/app-shell";
 import {
   ScreenHeader,
@@ -435,12 +436,15 @@ function BoutiqueTab({ settings }: { settings: SettingsType }) {
 // ---------- Tab 2: Maintenance ----------
 
 function MaintenanceTab({ settings }: { settings: SettingsType }) {
+  const { forceSync } = useSyncStatus();
   const [maintenanceMode, setMaintenanceMode] = useState(
     settings.maintenanceMode || false
   );
   const [saving, setSaving] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
   const [cacheCount, setCacheCount] = useState(0);
+  const [syncMessage, setSyncMessage] = useState("");
+  const [forcingSync, setForcingSync] = useState(false);
 
   const refreshLocalCounts = async () => {
     setPendingCount(await countPendingSync());
@@ -468,6 +472,17 @@ function MaintenanceTab({ settings }: { settings: SettingsType }) {
     } catch {
       toast.error("Impossible de vider la synchronisation");
     }
+  };
+
+  const forcePendingSync = async () => {
+    setForcingSync(true);
+    const results = await forceSync();
+    const failed = results.filter((result) => !result.ok);
+    setSyncMessage(results.length === 0
+      ? "Aucun élément traité. Vérifiez la connexion et la session."
+      : `${results.length - failed.length} succès, ${failed.length} échec(s)${failed[0] ? ` : ${failed[0].message}` : ""}`);
+    await refreshLocalCounts();
+    setForcingSync(false);
   };
 
   const resetCache = async () => {
@@ -622,6 +637,14 @@ function MaintenanceTab({ settings }: { settings: SettingsType }) {
             </div>
             <Button variant="outline" size="sm" onClick={clearPending} disabled={pendingCount === 0}>Vider</Button>
           </div>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-[13px] font-semibold text-slate-800">Forcer la synchronisation maintenant</p>
+              <p className="text-[12px] text-slate-500">Réessaie chaque élément et conserve les échecs.</p>
+            </div>
+            <Button variant="outline" size="sm" onClick={forcePendingSync} disabled={forcingSync || pendingCount === 0}>{forcingSync ? "Synchronisation…" : "Synchroniser"}</Button>
+          </div>
+          {syncMessage && <p className="text-[12px] text-slate-600 rounded-lg bg-slate-50 p-2">{syncMessage}</p>}
           <div className="flex items-center justify-between gap-3">
             <div>
               <p className="text-[13px] font-semibold text-slate-800">Réinitialiser le cache local</p>

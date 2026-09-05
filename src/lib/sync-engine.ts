@@ -8,6 +8,13 @@ const API_BASE = "/api";
 
 let syncing = false;
 let listeners: Array<(pending: number, syncing: boolean) => void> = [];
+export interface SyncAttemptResult {
+  id: string;
+  entity: string;
+  op: string;
+  ok: boolean;
+  message: string;
+}
 
 export function subscribeSync(
   cb: (pending: number, syncing: boolean) => void
@@ -45,11 +52,12 @@ export async function pullFromServer(): Promise<void> {
     );
     if (!me?.user) return;
 
-    const [invoices, clients, products] = await Promise.all([
+    const [invoiceResponse, clients, products] = await Promise.all([
       apiFetch("/invoices", { method: "GET" }),
       apiFetch("/clients", { method: "GET" }),
       apiFetch("/products", { method: "GET" }),
     ]);
+    const invoices = Array.isArray(invoiceResponse) ? invoiceResponse : invoiceResponse.invoices ?? [];
     const db = getDB();
     await db.transaction("rw", db.invoices, db.invoiceItems, db.clients, db.products, async () => {
       await db.invoices.clear();
@@ -69,8 +77,9 @@ export async function pullFromServer(): Promise<void> {
   }
 }
 
-async function processQueueItem(item: SyncQueueItem): Promise<boolean> {
+async function processQueueItem(item: SyncQueueItem): Promise<SyncAttemptResult> {
   const { entity, op, payload } = item;
+  console.info("[sync] tentative", { id: item.id, entity, op });
   try {
     if (entity === "invoice") {
       if (op === "delete") {
@@ -101,40 +110,44 @@ async function processQueueItem(item: SyncQueueItem): Promise<boolean> {
         });
       }
     }
-    return true;
+    const result = { id: item.id, entity, op, ok: true, message: "HTTP succès" };
+    console.info("[sync] succès", result);
+    return result;
   } catch (err) {
-    // Silent on expected failures (offline/unauthenticated); the queue will retry
-    return false;
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[sync] échec", { id: item.id, entity, op, message });
+    return { id: item.id, entity, op, ok: false, message };
   }
 }
 
 /** Flush the entire pending queue to the server. */
-export async function flushQueue(): Promise<void> {
-  if (syncing) return;
-  if (typeof navigator !== "undefined" && !navigator.onLine) return;
+export async function flushQueue(): Promise<SyncAttemptResult[]> {
+  if (syncing) return [];
+  if (typeof navigator !== "undefined" && !navigator.onLine) return [];
   syncing = true;
+  const results: SyncAttemptResult[] = [];
   emit(await countPendingSync(), true);
   try {
     const db = getDB();
     const items = await db.syncQueue.orderBy("createdAt").toArray();
     for (const item of items) {
-      const ok = await processQueueItem(item);
-      if (ok) {
+      const result = await processQueueItem(item);
+      results.push(result);
+      if (result.ok) {
         await db.syncQueue.delete(item.id);
       } else {
         await db.syncQueue.update(item.id, { retries: item.retries + 1 });
-        // Stop on first failure (likely auth or network) to preserve order
-        break;
       }
     }
     // After flushing, pull fresh canonical data so local store reflects server
     await pullFromServer();
-  } catch {
-    // Silent: expected when offline
+  } catch (err) {
+    console.error("[sync] flush global échoué", err);
   } finally {
     syncing = false;
     emit(await countPendingSync(), false);
   }
+  return results;
 }
 
 let started = false;
@@ -143,14 +156,18 @@ export function startSyncEngine() {
   if (started || typeof window === "undefined") return;
   started = true;
   window.addEventListener("online", () => {
-    flushQueue();
+    console.info("[sync] réseau disponible, vidage automatique");
+    void flushQueue();
+  });
+  window.addEventListener("sync-queue-added", () => {
+    if (navigator.onLine) void flushQueue();
   });
   // Also attempt a flush on startup if already online
   if (navigator.onLine) {
-    setTimeout(() => flushQueue(), 1500);
+    setTimeout(() => void flushQueue(), 1500);
   }
   // Periodic retry every 60s while online (covers flaky connections)
   setInterval(() => {
-    if (navigator.onLine) flushQueue();
+    if (navigator.onLine) void flushQueue();
   }, 60000);
 }

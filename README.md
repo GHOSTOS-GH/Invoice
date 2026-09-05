@@ -63,6 +63,8 @@ Copier les deux URLs depuis le tableau de bord Supabase. Ne jamais commiter `.en
 
 Avant le déploiement, créer manuellement dans Supabase Storage un bucket public nommé `product-images`. L'API Next.js utilise `SUPABASE_SERVICE_ROLE_KEY` pour écrire dans ce bucket et ne tente pas de le créer à chaque upload.
 
+Dans Supabase : **Storage → New bucket → Name `product-images` → Public bucket activé → Create bucket**. Vérifier ensuite que les fichiers sont lisibles via l’URL publique Storage. La clé `service_role` reste uniquement dans les variables privées Vercel Production et Preview.
+
 Le fichier `.env` est déjà exclu du dépôt par `.gitignore`. Pour vérifier qu'il est bien ignoré :
 
 ```bash

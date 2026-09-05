@@ -247,11 +247,11 @@ export function NewInvoiceScreen({ editInvoiceId }: { editInvoiceId?: string }) 
         }
       />
 
-      <div className="p-4 sm:p-6 max-w-3xl mx-auto space-y-4">
+      <div className="p-4 sm:p-6 max-w-3xl mx-auto space-y-6">
         {/* Client + status */}
-        <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 space-y-4">
+        <section className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 space-y-5 shadow-sm">
           <div className="relative">
-            <Label className="text-slate-700 font-medium mb-1.5 block">
+              <Label className="text-slate-900 font-bold mb-1.5 block text-[14px]">
               <User className="w-3.5 h-3.5 inline mr-1" /> Client *
             </Label>
             <Input
@@ -285,7 +285,7 @@ export function NewInvoiceScreen({ editInvoiceId }: { editInvoiceId?: string }) 
           </div>
 
           <div>
-            <Label className="text-slate-700 font-medium mb-1.5 block">Statut</Label>
+            <Label className="text-slate-900 font-bold mb-1.5 block text-[14px]">Statut de la facture</Label>
             <Select value={status} onValueChange={(v) => setStatus(v as InvoiceStatus)}>
               <SelectTrigger className="h-11 rounded-xl">
                 <SelectValue />
@@ -305,19 +305,19 @@ export function NewInvoiceScreen({ editInvoiceId }: { editInvoiceId?: string }) 
               </SelectContent>
             </Select>
           </div>
-        </div>
+        </section>
 
         {/* Items */}
-        <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5">
+        <section className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 shadow-sm">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="font-bold text-slate-900 text-[15px]">
+            <h3 className="font-extrabold text-slate-900 text-[17px]">
               Articles ({items.length})
             </h3>
             <Button
               variant="outline"
               size="sm"
               onClick={() => setShowProductPicker(true)}
-              className="rounded-xl h-10 border-[#2563EB] text-[#2563EB] font-bold"
+              className="rounded-[14px] h-11 border-[#2563EB] text-[#2563EB] font-bold px-4"
             >
               <Package className="w-5 h-5 mr-1.5" /> Choisir un produit
             </Button>
@@ -378,7 +378,7 @@ export function NewInvoiceScreen({ editInvoiceId }: { editInvoiceId?: string }) 
             <div className="col-span-3 sm:col-span-2">
               <Button
                 onClick={addItem}
-                className="w-full h-10 rounded-xl bg-[#2563EB] hover:bg-[#1D4ED8]"
+                className="w-full h-11 rounded-[14px] bg-[#2563EB] hover:bg-[#1D4ED8] font-bold"
               >
                 <PlusCircle className="w-4 h-4 mr-1" /> Ajouter
               </Button>
@@ -443,10 +443,10 @@ export function NewInvoiceScreen({ editInvoiceId }: { editInvoiceId?: string }) 
               ))}
             </div>
           )}
-        </div>
+        </section>
 
         {/* Notes */}
-        <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 space-y-3">
+        <section className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 space-y-3 shadow-sm">
           <h3 className="font-bold text-slate-900 text-[15px] flex items-center gap-2">
             <StickyNote className="w-4 h-4 text-[#2563EB]" /> Notes
           </h3>
@@ -459,10 +459,10 @@ export function NewInvoiceScreen({ editInvoiceId }: { editInvoiceId?: string }) 
               className="rounded-xl min-h-[70px] resize-none"
             />
           </div>
-        </div>
+        </section>
 
         {/* Totals — simple sum, no discount/tax */}
-        <div className="bg-gradient-to-br from-[#2563EB] to-[#1D4ED8] rounded-2xl p-5 text-white shadow-lg shadow-blue-500/25">
+        <section className="bg-gradient-to-br from-[#2563EB] to-[#1D4ED8] rounded-2xl p-5 text-white shadow-lg shadow-blue-500/25">
           <div className="flex justify-between text-[13px] mb-3">
             <span className="text-white/70">Sous-total ({totalQty} unités)</span>
             <span className="font-semibold">{formatCurrency(total)}</span>
@@ -471,7 +471,7 @@ export function NewInvoiceScreen({ editInvoiceId }: { editInvoiceId?: string }) 
             <span className="text-white/70 text-[12px] font-bold tracking-wider">TOTAL À PAYER</span>
             <span className="text-2xl font-extrabold">{formatCurrency(payable)}</span>
           </div>
-        </div>
+        </section>
 
         {/* Save */}
         <div className="sticky bottom-0 z-10 flex gap-3 pb-4 pt-3 bg-slate-50/95 backdrop-blur-sm">

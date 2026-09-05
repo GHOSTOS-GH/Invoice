@@ -9,7 +9,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { subscribeSync, startSyncEngine, pullFromServer } from "@/lib/sync-engine";
+import { subscribeSync, startSyncEngine, pullFromServer, flushQueue, type SyncAttemptResult } from "@/lib/sync-engine";
 import { countPendingSync } from "@/lib/offline-db";
 
 interface SyncStatus {
@@ -17,6 +17,7 @@ interface SyncStatus {
   pending: number;
   syncing: boolean;
   refresh: () => void;
+  forceSync: () => Promise<SyncAttemptResult[]>;
 }
 
 const Ctx = createContext<SyncStatus | null>(null);
@@ -31,7 +32,7 @@ export function SyncStatusProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const onOnline = () => {
       setOnline(true);
-      pullFromServer();
+      void pullFromServer();
     };
     const onOffline = () => setOnline(false);
     window.addEventListener("online", onOnline);
@@ -55,8 +56,14 @@ export function SyncStatusProvider({ children }: { children: ReactNode }) {
     countPendingSync().then(setPending);
   };
 
+  const forceSync = async () => {
+    const results = await flushQueue();
+    refresh();
+    return results;
+  };
+
   return (
-    <Ctx.Provider value={{ online, pending, syncing, refresh }}>
+    <Ctx.Provider value={{ online, pending, syncing, refresh, forceSync }}>
       {children}
     </Ctx.Provider>
   );

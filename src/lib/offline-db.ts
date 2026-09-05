@@ -73,6 +73,7 @@ export async function enqueueSync(
       createdAt: Date.now(),
       retries: 0,
     });
+    if (typeof window !== "undefined") window.dispatchEvent(new Event("sync-queue-added"));
   } catch (e) {
     console.warn("enqueueSync failed (IndexedDB unavailable?):", e);
   }

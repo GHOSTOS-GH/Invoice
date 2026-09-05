@@ -52,6 +52,7 @@ export async function POST(req: Request) {
 
     const extension = contentType.split("/")[1].replace("jpeg", "jpg");
     const path = `${new Date().toISOString().slice(0, 10)}/${randomUUID()}.${extension}`;
+    console.info("[upload] tentative Supabase Storage", { bucket: BUCKET, path, contentType, bytes: bytes.byteLength });
     const upload = await fetch(`${supabaseUrl}/storage/v1/object/${BUCKET}/${path}`, {
       method: "POST",
       headers: {
@@ -62,10 +63,15 @@ export async function POST(req: Request) {
       },
       body: bytes,
     });
-    if (!upload.ok) throw new Error("Upload Supabase Storage échoué");
+    if (!upload.ok) {
+      const details = await upload.text().catch(() => "réponse illisible");
+      console.error("[upload] Supabase Storage a refusé le fichier", { status: upload.status, details });
+      throw new Error(`Supabase Storage HTTP ${upload.status}: ${details}`);
+    }
 
     return Response.json({ url: `${supabaseUrl}/storage/v1/object/public/${BUCKET}/${path}` });
   } catch (err) {
+    console.error("[upload] échec serveur", err);
     if (err instanceof Error && err.message === "Configuration Supabase Storage manquante") {
       return Response.json({ error: "SUPABASE_SERVICE_ROLE_KEY et SUPABASE_URL sont requis pour l'upload d'image" }, { status: 503 });
     }
