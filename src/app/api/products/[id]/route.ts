@@ -1,7 +1,7 @@
-// PUT/DELETE /api/products/[id] — admin only
+// PUT/DELETE /api/products/[id] — isolation par createdBy
 import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
-import { requireRole, authErrorResponse } from "@/lib/auth";
+import { requireActiveClient, authErrorResponse } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
@@ -10,10 +10,12 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const user = await requireRole("admin");
+    const user = await requireActiveClient();
     const { id } = await params;
     const body = await req.json();
-    const existing = await db.product.findUnique({ where: { id } });
+    const existing = await db.product.findFirst({
+      where: { id, createdBy: user.id },
+    });
     if (!existing) {
       return Response.json({ error: "Produit introuvable" }, { status: 404 });
     }
@@ -37,9 +39,11 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const user = await requireRole("admin");
+    const user = await requireActiveClient();
     const { id } = await params;
-    const existing = await db.product.findUnique({ where: { id } });
+    const existing = await db.product.findFirst({
+      where: { id, createdBy: user.id },
+    });
     if (!existing) {
       return Response.json({ error: "Produit introuvable" }, { status: 404 });
     }

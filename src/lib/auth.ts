@@ -1,12 +1,12 @@
 // Server-side auth: password hashing + JWT session management.
-// Replaces Supabase Auth in this self-hosted environment.
+// Multi-tenant SaaS: two roles only ("superadmin" | "client"), gated access.
 
 import { compare, hash } from "bcryptjs";
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
 import { db } from "./db";
-import { SESSION_COOKIE, SESSION_MAX_AGE, type UserRole } from "./constants";
-import type { SessionUser } from "./types";
+import { SESSION_COOKIE, SESSION_MAX_AGE } from "./constants";
+import type { SessionUser, UserRole } from "./types";
 
 const JWT_SECRET = new TextEncoder().encode(
   process.env.JWT_SECRET || "dev-invoice-secret-change-me-in-prod-please"
@@ -46,6 +46,11 @@ export async function verifySessionToken(
       phone: payload.phone as string,
       role: payload.role as UserRole,
       name: (payload.name as string) || null,
+      // Placeholders — the real values are always re-read from DB (getCurrentUser).
+      disabled: false,
+      isApproved: false,
+      subscriptionStatus: "pending",
+      paymentClaimedAt: null,
     };
   } catch {
     return null;
@@ -78,7 +83,10 @@ export async function clearSessionCookie() {
   store.delete(SESSION_COOKIE);
 }
 
-/** Fetch the full DB user for a session, applying the DB as source of truth for role/disabled. */
+/**
+ * Fetch the full DB user for a session. The DB is the single source of truth
+ * for role / disabled / isApproved / subscriptionStatus / paymentClaimedAt.
+ */
 export async function getCurrentUser() {
   const session = await getSession();
   if (!session) return null;
@@ -91,7 +99,9 @@ export async function getCurrentUser() {
  * RLS-equivalent: returns the session user or throws a 401-shaped error.
  * Used by API routes to guard access.
  */
-export async function requireAuth(): Promise<NonNullable<Awaited<ReturnType<typeof getCurrentUser>>>> {
+export async function requireAuth(): Promise<
+  NonNullable<Awaited<ReturnType<typeof getCurrentUser>>>
+> {
   const user = await getCurrentUser();
   if (!user) {
     throw new AuthError("Non authentifié", 401);
@@ -99,11 +109,24 @@ export async function requireAuth(): Promise<NonNullable<Awaited<ReturnType<type
   return user;
 }
 
-/** Require a minimum role level (employee >= client, admin >= employee). */
-export async function requireRole(min: UserRole) {
+/**
+ * Business-data guard (API-side, blocks direct API calls):
+ * a client account must be approved AND have an active subscription.
+ * The superadmin is always allowed through (he has no business data anyway).
+ */
+export async function requireActiveClient() {
   const user = await requireAuth();
-  const order: Record<UserRole, number> = { client: 0, employee: 1, admin: 2 };
-  if (order[user.role as UserRole] < order[min]) {
+  if (user.role === "superadmin") return user;
+  if (!user.isApproved || user.subscriptionStatus !== "active") {
+    throw new AuthError("ACCES_NON_AProuVE", 403);
+  }
+  return user;
+}
+
+/** Superadmin-only guard (platform dashboard). */
+export async function requireSuperadmin() {
+  const user = await requireAuth();
+  if (user.role !== "superadmin") {
     throw new AuthError("Accès refusé", 403);
   }
   return user;

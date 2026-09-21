@@ -1,14 +1,4 @@
-// UI + domain constants reproducing lib/utils/constants.dart
-
-// Design tokens from the Flutter app
-export const CARD_RADIUS = 16;
-export const BUTTON_RADIUS = 14;
-export const INPUT_RADIUS = 14;
-
-// Tailwind class equivalents for convenience
-export const cardRadiusClass = "rounded-2xl"; // 16px
-export const buttonRadiusClass = "rounded-[14px]";
-export const inputRadiusClass = "rounded-[14px]";
+// UI + domain constants — plateforme SaaS multi-tenant
 
 // Invoice status enum reproduction (InvoiceStatus in invoice.dart)
 export type InvoiceStatus = "enCours" | "enLivraison" | "livree";
@@ -46,30 +36,63 @@ export const INVOICE_STATUSES: InvoiceStatus[] = [
   "livree",
 ];
 
-export type UserRole = "client" | "employee" | "admin";
+export type UserRole = "superadmin" | "client";
+export type SubscriptionStatus = "pending" | "active" | "suspended" | "expired";
+
+export const SUBSCRIPTION_STATUSES: SubscriptionStatus[] = [
+  "pending",
+  "active",
+  "suspended",
+  "expired",
+];
+
+export const SUBSCRIPTION_META: Record<
+  SubscriptionStatus,
+  { label: string; color: string; bg: string; text: string }
+> = {
+  pending: {
+    label: "En attente",
+    color: "#F59E0B",
+    bg: "bg-amber-100",
+    text: "text-amber-700",
+  },
+  active: {
+    label: "Actif",
+    color: "#16A34A",
+    bg: "bg-emerald-100",
+    text: "text-emerald-700",
+  },
+  suspended: {
+    label: "Suspendu",
+    color: "#F97316",
+    bg: "bg-orange-100",
+    text: "text-orange-700",
+  },
+  expired: {
+    label: "Expiré",
+    color: "#DC2626",
+    bg: "bg-red-100",
+    text: "text-red-700",
+  },
+};
 
 export const ROLE_META: Record<
   UserRole,
   { label: string; description: string; color: string }
 > = {
-  admin: {
-    label: "Administrateur",
-    description: "Accès total, gestion des comptes et réglages",
-    color: "#2563EB",
-  },
-  employee: {
-    label: "Employé",
-    description: "Factures, clients et produits",
-    color: "#16A34A",
+  superadmin: {
+    label: "Superadmin",
+    description: "Gestion de la plateforme et des comptes",
+    color: "#7C3AED",
   },
   client: {
     label: "Client",
-    description: "Accès limité",
-    color: "#9E9E9E",
+    description: "Boutique : factures, clients, produits",
+    color: "#2563EB",
   },
 };
 
-// App brand colors (from login_screen.dart gradient)
+// App brand colors
 export const BRAND = {
   primary: "#2563EB",
   primaryDark: "#1D4ED8",
@@ -80,10 +103,6 @@ export const BRAND = {
   surface: "#F8FAFC",
   border: "#E2E8F0",
 };
-
-// Sync queue operation kinds
-export type SyncOpKind = "create" | "update" | "delete";
-export type SyncEntityType = "invoice" | "client" | "product";
 
 // CSV column keys for import/export compatibility with the mobile app
 export const CSV_COLUMNS = [

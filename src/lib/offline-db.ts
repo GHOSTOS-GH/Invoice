@@ -1,37 +1,40 @@
 // Offline-first local store using Dexie (IndexedDB).
-// Stores local copies of invoices/clients/products + a sync queue.
-// Mirrors the offline-first requirement: every mutation works offline,
-// is stored with a "pending sync" flag, then flushed to the server on reconnect.
+// IndexedDB est la source de vérité locale immédiate : toutes les mutations
+// fonctionnent hors ligne, chaque donnée porte un statut de sauvegarde clair
+// ("saved" = en ligne, "local" = enregistré localement uniquement).
+// La synchronisation est SIMPLE : envoi direct au moment de l'action si en ligne,
+// sinon statut "local" + bouton « Sauvegarder en ligne » / « Réessayer » explicite.
+// Pas de file d'attente, pas de retry automatique en arrière-plan.
 
 import Dexie, { type Table } from "dexie";
 import type { Invoice, Client, Product, InvoiceItem } from "./types";
-import type { SyncOpKind, SyncEntityType } from "./constants";
 
-export interface SyncQueueItem {
-  id: string; // cuid-style local id
-  entity: SyncEntityType;
-  op: SyncOpKind;
-  payload: any; // the full entity for create/update, or { id } for delete
-  createdAt: number;
-  retries: number;
+export type SyncState = "saved" | "local";
+
+export interface LocalInvoice extends Invoice {
+  syncState: SyncState;
+}
+export interface LocalClient extends Client {
+  syncState: SyncState;
+}
+export interface LocalProduct extends Product {
+  syncState: SyncState;
 }
 
 export class InvoicePwaDB extends Dexie {
-  invoices!: Table<Invoice, string>;
+  invoices!: Table<LocalInvoice, string>;
   invoiceItems!: Table<InvoiceItem, string>;
-  clients!: Table<Client, string>;
-  products!: Table<Product, string>;
-  syncQueue!: Table<SyncQueueItem, string>;
+  clients!: Table<LocalClient, string>;
+  products!: Table<LocalProduct, string>;
   meta!: Table<{ key: string; value: any }, string>;
 
   constructor() {
     super("invoice_pwa_db");
     this.version(1).stores({
-      invoices: "id, clientName, status, createdAt, updatedAt, clientId",
+      invoices: "id, clientName, status, createdAt, updatedAt, clientId, syncState",
       invoiceItems: "id, invoiceId, name",
-      clients: "id, name, createdAt",
-      products: "id, category, name",
-      syncQueue: "id, entity, op, createdAt",
+      clients: "id, name, createdAt, syncState",
+      products: "id, category, name, syncState",
       meta: "key",
     });
   }
@@ -41,14 +44,11 @@ export class InvoicePwaDB extends Dexie {
 let _db: InvoicePwaDB | null = null;
 export function getDB(): InvoicePwaDB {
   if (typeof window === "undefined") {
-    // Return a no-op stub during SSR — methods won't be called.
     throw new Error("Dexie DB accessed on server");
   }
   if (!_db) _db = new InvoicePwaDB();
   return _db;
 }
-
-// ---------- Sync queue helpers ----------
 
 let _idCounter = 0;
 export function localId(prefix = "local"): string {
@@ -56,35 +56,6 @@ export function localId(prefix = "local"): string {
   return `${prefix}_${Date.now().toString(36)}_${_idCounter.toString(36)}_${Math.random()
     .toString(36)
     .slice(2, 8)}`;
-}
-
-export async function enqueueSync(
-  entity: SyncEntityType,
-  op: SyncOpKind,
-  payload: any
-): Promise<void> {
-  try {
-    const db = getDB();
-    await db.syncQueue.add({
-      id: localId("sync"),
-      entity,
-      op,
-      payload,
-      createdAt: Date.now(),
-      retries: 0,
-    });
-    if (typeof window !== "undefined") window.dispatchEvent(new Event("sync-queue-added"));
-  } catch (e) {
-    console.warn("enqueueSync failed (IndexedDB unavailable?):", e);
-  }
-}
-
-export async function countPendingSync(): Promise<number> {
-  try {
-    return await getDB().syncQueue.count();
-  } catch {
-    return 0;
-  }
 }
 
 export async function clearAllLocal(): Promise<void> {
@@ -95,11 +66,25 @@ export async function clearAllLocal(): Promise<void> {
       db.invoiceItems.clear(),
       db.clients.clear(),
       db.products.clear(),
-      db.syncQueue.clear(),
       db.meta.clear(),
     ]);
   } catch (e) {
     console.warn("clearAllLocal failed:", e);
+  }
+}
+
+/** Nombre d'enregistrements locaux non sauvegardés en ligne. */
+export async function countPendingLocal(): Promise<number> {
+  try {
+    const db = getDB();
+    const [i, c, p] = await Promise.all([
+      db.invoices.where("syncState").equals("local").count(),
+      db.clients.where("syncState").equals("local").count(),
+      db.products.where("syncState").equals("local").count(),
+    ]);
+    return i + c + p;
+  } catch {
+    return 0;
   }
 }
 

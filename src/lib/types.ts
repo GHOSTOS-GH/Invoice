@@ -1,7 +1,9 @@
-// Shared TypeScript domain types — mirrors the Prisma models
+// Shared TypeScript domain types — mirrors the Prisma models (multi-tenant)
 
 export type InvoiceStatus = "enCours" | "enLivraison" | "livree";
-export type UserRole = "client" | "employee" | "admin";
+/** Deux rôles seulement : le superadmin gère la plateforme, le client est une boutique payante. */
+export type UserRole = "superadmin" | "client";
+export type SubscriptionStatus = "pending" | "active" | "suspended" | "expired";
 
 export interface InvoiceItem {
   id: string;
@@ -45,7 +47,7 @@ export interface Product {
 
 export interface Settings {
   id: string;
-  maintenanceMode: boolean;
+  userId: string;
   shopName: string;
   shopAddress: string;
   shopPhone: string;
@@ -61,14 +63,22 @@ export interface User {
   role: UserRole;
   name?: string | null;
   disabled: boolean;
+  isApproved: boolean;
+  subscriptionStatus: SubscriptionStatus;
+  paymentClaimedAt?: string | null;
   createdAt: string;
 }
 
+/** Compte tel que renvoyé par /api/auth/me et stocké côté client. */
 export interface SessionUser {
   id: string;
   phone: string;
   role: UserRole;
   name?: string | null;
+  disabled: boolean;
+  isApproved: boolean;
+  subscriptionStatus: SubscriptionStatus;
+  paymentClaimedAt?: string | null;
 }
 
 // ---------- Derived calculations (mirror invoice.dart, simplified) ----------

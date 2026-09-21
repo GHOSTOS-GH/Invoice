@@ -1,7 +1,7 @@
-// GET/PUT/DELETE /api/clients/[id]
+// GET/PUT/DELETE /api/clients/[id] — isolation par createdBy
 import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
-import { requireAuth, authErrorResponse } from "@/lib/auth";
+import { requireActiveClient, authErrorResponse } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
@@ -10,14 +10,11 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const user = await requireAuth();
-    if (user.role === "client") {
-      return Response.json({ error: "Accès refusé" }, { status: 403 });
-    }
+    const user = await requireActiveClient();
     const { id } = await params;
-    const client = await db.client.findUnique({
-      where: { id },
-      include: { invoices: { orderBy: { createdAt: "desc" } } },
+    const client = await db.client.findFirst({
+      where: { id, createdBy: user.id },
+      include: { invoices: { where: { createdBy: user.id }, orderBy: { createdAt: "desc" } } },
     });
     if (!client) {
       return Response.json({ error: "Client introuvable" }, { status: 404 });
@@ -33,13 +30,10 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const user = await requireAuth();
-    if (user.role === "client") {
-      return Response.json({ error: "Accès refusé" }, { status: 403 });
-    }
+    const user = await requireActiveClient();
     const { id } = await params;
     const body = await req.json();
-    const existing = await db.client.findUnique({ where: { id } });
+    const existing = await db.client.findFirst({ where: { id, createdBy: user.id } });
     if (!existing) {
       return Response.json({ error: "Client introuvable" }, { status: 404 });
     }
@@ -63,12 +57,9 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const user = await requireAuth();
-    if (user.role === "client") {
-      return Response.json({ error: "Accès refusé" }, { status: 403 });
-    }
+    const user = await requireActiveClient();
     const { id } = await params;
-    const existing = await db.client.findUnique({ where: { id } });
+    const existing = await db.client.findFirst({ where: { id, createdBy: user.id } });
     if (!existing) {
       return Response.json({ error: "Client introuvable" }, { status: 404 });
     }

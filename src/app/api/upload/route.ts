@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { requireAuth, authErrorResponse } from "@/lib/auth";
+import { requireActiveClient, authErrorResponse } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
@@ -18,7 +18,8 @@ function storageConfig() {
 
 export async function POST(req: Request) {
   try {
-    await requireAuth();
+    // Upload réservé aux comptes approuvés avec abonnement actif.
+    await requireActiveClient();
     const { supabaseUrl, serviceKey } = storageConfig();
     let bytes: ArrayBuffer;
     let contentType: string;

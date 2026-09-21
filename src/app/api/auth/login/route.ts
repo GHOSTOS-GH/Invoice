@@ -1,4 +1,7 @@
-// POST /api/auth/login — phone (+221) + password
+// POST /api/auth/login — phone (+221) + password.
+// La connexion réussit même si le compte n'est pas encore approuvé :
+// c'est l'écran d'attente (côté client) et le garde API côté serveur
+// qui bloquent l'accès aux données métier.
 import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import {
@@ -10,6 +13,19 @@ import {
 import { normalizeSenegalPhone } from "@/lib/formatters";
 
 export const runtime = "nodejs";
+
+function publicUser(u: any) {
+  return {
+    id: u.id,
+    phone: u.phone,
+    role: u.role,
+    name: u.name,
+    disabled: u.disabled,
+    isApproved: u.isApproved,
+    subscriptionStatus: u.subscriptionStatus,
+    paymentClaimedAt: u.paymentClaimedAt,
+  };
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -36,15 +52,7 @@ export async function POST(req: NextRequest) {
       name: user.name,
     });
     await setSessionCookie(token);
-    return Response.json({
-      user: {
-        id: user.id,
-        phone: user.phone,
-        role: user.role,
-        name: user.name,
-        disabled: user.disabled,
-      },
-    });
+    return Response.json({ user: publicUser(user) });
   } catch (err) {
     return authErrorResponse(err);
   }

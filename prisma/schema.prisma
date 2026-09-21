@@ -1,5 +1,7 @@
-// Prisma schema for Invoice PWA
-// Reproduces the data models from the Flutter invoice_app
+// Prisma schema — Plateforme SaaS multi-tenant "Facturier"
+// Un compte User = une boutique (un client final payant). Isolation stricte :
+// chaque utilisateur ne voit QUE ses propres données (createdBy/userId).
+// Rôles : "superadmin" (gestion de la plateforme) | "client" (boutique payante).
 
 generator client {
   provider = "prisma-client-js"
@@ -12,27 +14,40 @@ datasource db {
 }
 
 model User {
-  id           String   @id @default(cuid())
-  phone        String   @unique // format +221XXXXXXXXX
-  passwordHash String
-  role         String   @default("client") // client | employee | admin
-  name         String?
-  disabled     Boolean  @default(false)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id                 String    @id @default(cuid())
+  phone              String    @unique // format +221XXXXXXXXX
+  passwordHash       String
+  /// "superadmin" (opérateur de la plateforme) | "client" (boutique payante)
+  role               String    @default("client")
+  name               String?
+  /// Compte bloqué par le superadmin
+  disabled           Boolean   @default(false)
+  /// Validé manuellement par le superadmin après paiement — seul déclencheur d'accès
+  isApproved         Boolean   @default(false)
+  /// "pending" | "active" | "suspended" | "expired"
+  subscriptionStatus String    @default("pending")
+  /// Horodatage du clic client « J'ai effectué le paiement » (null = pas signalé)
+  paymentClaimedAt   DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
-  invoices  Invoice[]
-  clients   Client[]
-  products  Product[]
+  invoices Invoice[]
+  clients  Client[]
+  products Product[]
+  settings Settings?
+
+  @@index([isApproved, subscriptionStatus])
+  @@index([role])
 }
 
 model Invoice {
   id         String   @id @default(cuid())
   clientName String
-  clientId   String?  // optional real relation to Client
+  clientId   String? // optional real relation to Client
   client     Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
   status     String   @default("enCours") // enCours | enLivraison | livree
   notes      String?
+  /// Propriétaire : le compte boutique. Toutes les requêtes filtrent par ce champ.
   createdBy  String
   creator    User     @relation(fields: [createdBy], references: [id], onDelete: Cascade)
   createdAt  DateTime @default(now())
@@ -40,18 +55,19 @@ model Invoice {
 
   items InvoiceItem[]
 
+  @@index([createdBy, createdAt])
   @@index([clientName])
   @@index([status])
   @@index([createdAt])
 }
 
 model InvoiceItem {
-  id         String  @id @default(cuid())
-  invoiceId  String
-  invoice    Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
-  name       String
-  quantity   Int
-  unitPrice  Float
+  id        String  @id @default(cuid())
+  invoiceId String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  name      String
+  quantity  Int
+  unitPrice Float
 
   @@index([invoiceId])
 }
@@ -61,6 +77,7 @@ model Client {
   name      String
   phone     String?
   address   String?
+  /// Propriétaire : le compte boutique (à distinguer du client final ci-dessus)
   createdBy String
   creator   User     @relation(fields: [createdBy], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
@@ -68,6 +85,7 @@ model Client {
 
   invoices Invoice[]
 
+  @@index([createdBy, name])
   @@index([name])
 }
 
@@ -76,23 +94,28 @@ model Product {
   name      String
   category  String
   imageUrl  String?
+  /// Propriétaire : le compte boutique
   createdBy String
   creator   User     @relation(fields: [createdBy], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@index([createdBy, category])
   @@index([category])
   @@index([name])
 }
 
 model Settings {
-  id              String  @id @default("singleton")
-  maintenanceMode Boolean @default(false)
-  shopName        String  @default("")
-  shopAddress     String  @default("")
-  shopPhone       String  @default("")
-  shopNinea       String  @default("")
-  footerMessage   String  @default("Merci de votre visite !")
+  id              String   @id @default(cuid())
+  /// Propriétaire : une boutique = ses propres réglages (logo, infos facture…)
+  userId          String   @unique
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shopName        String   @default("")
+  shopAddress     String   @default("")
+  shopPhone       String   @default("")
+  shopNinea       String   @default("")
+  footerMessage   String   @default("Merci de votre visite !")
   logoUrl         String?
+  createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 }

@@ -1,4 +1,4 @@
-// GET /api/auth/me — current session user
+// GET /api/auth/me — current session user with full account status
 import { getCurrentUser } from "@/lib/auth";
 
 export const runtime = "nodejs";
@@ -13,6 +13,9 @@ export async function GET() {
       role: user.role,
       name: user.name,
       disabled: user.disabled,
+      isApproved: user.isApproved,
+      subscriptionStatus: user.subscriptionStatus,
+      paymentClaimedAt: user.paymentClaimedAt,
     },
   });
 }

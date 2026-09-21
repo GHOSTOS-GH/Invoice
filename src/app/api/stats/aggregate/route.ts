@@ -1,5 +1,7 @@
+// GET /api/stats/aggregate — statistiques du compte connecté uniquement.
+// Le CA exclut les factures "enCours" (uniquement enLivraison + livree).
 import { db } from "@/lib/db";
-import { requireRole, authErrorResponse } from "@/lib/auth";
+import { requireActiveClient, authErrorResponse } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
@@ -16,13 +18,18 @@ function periodStart(period: Period) {
 
 export async function GET(req: Request) {
   try {
-    await requireRole("employee");
+    const user = await requireActiveClient();
+    // Isolation : toutes les requêtes sont contraintes au propriétaire des données.
+    const owner = user.id.replace(/'/g, "''");
     const rawPeriod = new URL(req.url).searchParams.get("period") as Period | null;
     const period: Period = rawPeriod && ["day", "week", "month", "all"].includes(rawPeriod)
       ? rawPeriod
       : "week";
     const start = periodStart(period);
-    const dateFilter = start ? `AND i."createdAt" >= ${start}` : undefined;
+    const ownerFilter = `AND i."createdBy" = '${owner}'`;
+    const ownerFilter2 = `AND i2."createdBy" = '${owner}'`;
+    const dateFilter = start ? `AND i."createdAt" >= '${(start as Date).toISOString()}'` : "";
+    const dateFilter2 = start ? `AND i2."createdAt" >= '${(start as Date).toISOString()}'` : "";
 
     const [summary, statusCounts, topClients, topProducts, series] = await Promise.all([
       db.$queryRawUnsafe<Array<{ total_ca: number | null; invoice_count: bigint; article_count: bigint; average: number | null; largest: number | null }>>(`
@@ -36,37 +43,37 @@ export async function GET(req: Request) {
         LEFT JOIN (
           SELECT i2.id, SUM(ii2.quantity * ii2."unitPrice") AS total
           FROM "Invoice" i2 JOIN "InvoiceItem" ii2 ON ii2."invoiceId" = i2.id
-          WHERE i2.status IN ('enLivraison', 'livree') ${start ? `AND i2."createdAt" >= $1` : ""}
+          WHERE i2.status IN ('enLivraison', 'livree') ${ownerFilter2} ${dateFilter2}
           GROUP BY i2.id
         ) t ON t.id = i.id
-        WHERE i.status IN ('enLivraison', 'livree') ${start ? `AND i."createdAt" >= $1` : ""}
-      `, ...(start ? [start] : [])),
+        WHERE i.status IN ('enLivraison', 'livree') ${ownerFilter} ${dateFilter}
+      `),
       db.$queryRawUnsafe<Array<{ status: string; count: bigint; total: number }>>(`
         SELECT i.status, COUNT(DISTINCT i.id) AS count,
           COALESCE(SUM(ii.quantity * ii."unitPrice"), 0) AS total
         FROM "Invoice" i LEFT JOIN "InvoiceItem" ii ON ii."invoiceId" = i.id
-        WHERE 1=1 ${start ? `AND i."createdAt" >= $1` : ""}
+        WHERE 1=1 ${ownerFilter} ${dateFilter}
         GROUP BY i.status
-      `, ...(start ? [start] : [])),
+      `),
       db.$queryRawUnsafe<Array<{ name: string; value: number }>>(`
         SELECT i."clientName" AS name, SUM(ii.quantity * ii."unitPrice") AS value
         FROM "Invoice" i JOIN "InvoiceItem" ii ON ii."invoiceId" = i.id
-        WHERE i.status IN ('enLivraison', 'livree') ${start ? `AND i."createdAt" >= $1` : ""}
+        WHERE i.status IN ('enLivraison', 'livree') ${ownerFilter} ${dateFilter}
         GROUP BY i."clientName" ORDER BY value DESC LIMIT 5
-      `, ...(start ? [start] : [])),
+      `),
       db.$queryRawUnsafe<Array<{ name: string; value: bigint }>>(`
         SELECT ii.name, SUM(ii.quantity) AS value
         FROM "InvoiceItem" ii JOIN "Invoice" i ON i.id = ii."invoiceId"
-        WHERE i.status IN ('enLivraison', 'livree') ${start ? `AND i."createdAt" >= $1` : ""}
+        WHERE i.status IN ('enLivraison', 'livree') ${ownerFilter} ${dateFilter}
         GROUP BY ii.name ORDER BY value DESC LIMIT 5
-      `, ...(start ? [start] : [])),
+      `),
       db.$queryRawUnsafe<Array<{ label: string; value: number }>>(`
         SELECT TO_CHAR(DATE_TRUNC('${period === "all" ? "month" : "day"}', i."createdAt"), '${period === "all" ? "YYYY-MM" : "YYYY-MM-DD"}') AS label,
           COALESCE(SUM(ii.quantity * ii."unitPrice"), 0) AS value
         FROM "Invoice" i JOIN "InvoiceItem" ii ON ii."invoiceId" = i.id
-        WHERE i.status IN ('enLivraison', 'livree') ${start ? `AND i."createdAt" >= $1` : ""}
+        WHERE i.status IN ('enLivraison', 'livree') ${ownerFilter} ${dateFilter}
         GROUP BY 1 ORDER BY 1
-      `, ...(start ? [start] : [])),
+      `),
     ]);
 
     const row = summary[0] ?? { total_ca: 0, invoice_count: BigInt(0), article_count: BigInt(0), average: 0, largest: 0 };

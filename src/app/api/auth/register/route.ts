@@ -1,4 +1,4 @@
-// POST /api/auth/register — open signup, default role "client"
+// POST /api/auth/register — inscription ouverte, compte client en attente d'approbation
 import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import {
@@ -45,13 +45,17 @@ export async function POST(req: NextRequest) {
         { status: 409 }
       );
     }
-    // New accounts are ALWAYS "client" — no way to self-promote.
+    // Nouveau compte = un client final : rôle "client", non approuvé, abonnement
+    // en attente. Il ne peut pas utiliser l'app tant que le superadmin n'a pas
+    // approuvé son compte après paiement.
     const user = await db.user.create({
       data: {
         phone: normalized,
         passwordHash: await hashPassword(password),
         name: name?.trim() || null,
         role: "client",
+        isApproved: false,
+        subscriptionStatus: "pending",
       },
     });
     const token = await createSessionToken({
@@ -68,6 +72,9 @@ export async function POST(req: NextRequest) {
         role: user.role,
         name: user.name,
         disabled: user.disabled,
+        isApproved: user.isApproved,
+        subscriptionStatus: user.subscriptionStatus,
+        paymentClaimedAt: user.paymentClaimedAt,
       },
     });
   } catch (err) {

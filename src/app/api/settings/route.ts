@@ -1,19 +1,24 @@
-// GET /api/settings — public-ish (shop info visible to all logged-in users)
-// PUT /api/settings — admin only
+// GET /api/settings — réglages de la boutique du compte connecté (auto-créés)
+// PUT /api/settings — mise à jour par le propriétaire uniquement
 import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
-import { requireAuth, requireRole, authErrorResponse } from "@/lib/auth";
+import { requireActiveClient, authErrorResponse } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
 export async function GET() {
   try {
-    await requireAuth();
-    let settings = await db.settings.findUnique({ where: { id: "singleton" } });
-    if (!settings) {
-      settings = await db.settings.create({ data: { id: "singleton" } });
+    const user = await requireActiveClient();
+    // Une boutique = ses propres réglages. Le superadmin obtient un jeu vide.
+    let settings = await db.settings.findUnique({
+      where: { userId: user.id },
+    });
+    if (!settings && user.role === "client") {
+      settings = await db.settings.create({
+        data: { userId: user.id, shopName: "" },
+      });
     }
-    return Response.json(settings);
+    return Response.json(settings ?? { userId: user.id, shopName: "", shopAddress: "", shopPhone: "", shopNinea: "", footerMessage: "Merci de votre visite !", logoUrl: null });
   } catch (err) {
     return authErrorResponse(err);
   }
@@ -21,11 +26,15 @@ export async function GET() {
 
 export async function PUT(req: NextRequest) {
   try {
-    // Only admins can change settings (maintenance mode, shop info, logo)
-    await requireRole("admin");
+    const user = await requireActiveClient();
+    if (user.role !== "client") {
+      return Response.json(
+        { error: "Seuls les comptes clients ont des réglages boutique" },
+        { status: 403 }
+      );
+    }
     const body = await req.json();
     const data: any = { updatedAt: new Date() };
-    if (typeof body.maintenanceMode === "boolean") data.maintenanceMode = body.maintenanceMode;
     if (typeof body.shopName === "string") data.shopName = body.shopName;
     if (typeof body.shopAddress === "string") data.shopAddress = body.shopAddress;
     if (typeof body.shopPhone === "string") data.shopPhone = body.shopPhone;
@@ -34,9 +43,9 @@ export async function PUT(req: NextRequest) {
     if (typeof body.logoUrl === "string") data.logoUrl = body.logoUrl || null;
 
     const updated = await db.settings.upsert({
-      where: { id: "singleton" },
+      where: { userId: user.id },
       update: data,
-      create: { id: "singleton", ...data },
+      create: { userId: user.id, ...data },
     });
     return Response.json(updated);
   } catch (err) {
