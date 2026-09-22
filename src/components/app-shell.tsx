@@ -1,11 +1,15 @@
 "use client";
-// App shell: sidebar (desktop) + bottom nav (mobile), view switching,
-// maintenance gate, and a sync/offline banner.
+// App shell : sidebar (desktop) + bottom nav (mobile), changement de vue,
+// garde-fous d'accès (maintenance, compte non approuvé / abonnement inactif),
+// et bannière de statut de sauvegarde en ligne.
+// Modèle multi-tenant : deux rôles seulement — "superadmin" (plateforme)
+// et "client" (boutique payante). Plus aucune notion d'employé/admin.
 
 import { useEffect, useState, useCallback } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { LoginScreen } from "@/components/auth/login-screen";
 import { OfflineBanner } from "@/components/shared/offline-banner";
+import { PendingApprovalScreen } from "@/components/auth/pending-approval-screen";
 import { ROLE_META } from "@/lib/constants";
 import type { UserRole } from "@/lib/constants";
 import {
@@ -15,14 +19,13 @@ import {
   Settings as SettingsIcon,
   Package,
   Upload,
-  Users,
   LogOut,
   Loader2,
   HardHat,
-  ShieldAlert,
   LayoutDashboard,
   ShieldCheck,
-  Briefcase,
+  Store,
+  Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -36,33 +39,35 @@ export type ViewId =
   | "stats"
   | "settings"
   | "csv-import"
-  | "users";
+  | "superadmin";
 
 interface NavItem {
   id: ViewId;
   label: string;
   icon: typeof ReceiptText;
-  minRole: UserRole; // minimum role required
+  superadminOnly?: boolean;
   mobileOnly?: boolean;
 }
 
+// Navigation « boutique » : visible par tous les comptes clients actifs.
+// L'écran superadmin est réservé au rôle superadmin.
 const NAV_ITEMS: NavItem[] = [
-  { id: "dashboard", label: "Accueil", icon: LayoutDashboard, minRole: "employee" },
-  { id: "invoices", label: "Factures", icon: ReceiptText, minRole: "employee" },
-  { id: "new-invoice", label: "Nouvelle", icon: PlusCircle, minRole: "employee" },
-  { id: "clients", label: "Clients", icon: Users, minRole: "employee" },
-  { id: "stats", label: "Statistiques", icon: BarChart3, minRole: "employee" },
-  { id: "products", label: "Produits", icon: Package, minRole: "admin" },
-  { id: "csv-import", label: "Import CSV", icon: Upload, minRole: "employee" },
-  { id: "settings", label: "Réglages", icon: SettingsIcon, minRole: "admin" },
-  { id: "users", label: "Comptes", icon: Users, minRole: "admin" },
+  { id: "dashboard", label: "Accueil", icon: LayoutDashboard },
+  { id: "invoices", label: "Factures", icon: ReceiptText },
+  { id: "new-invoice", label: "Nouvelle", icon: PlusCircle },
+  { id: "clients", label: "Clients", icon: Users },
+  { id: "stats", label: "Statistiques", icon: BarChart3 },
+  { id: "products", label: "Produits", icon: Package },
+  { id: "csv-import", label: "Import CSV", icon: Upload },
+  { id: "settings", label: "Réglages", icon: SettingsIcon },
+  { id: "superadmin", label: "Comptes", icon: ShieldCheck, superadminOnly: true },
 ];
 
 const MOBILE_NAV: NavItem[] = [
-  { id: "dashboard", label: "Accueil", icon: LayoutDashboard, minRole: "employee" },
-  { id: "invoices", label: "Factures", icon: ReceiptText, minRole: "employee" },
-  { id: "new-invoice", label: "Nouvelle", icon: PlusCircle, minRole: "employee" },
-  { id: "stats", label: "Stats", icon: BarChart3, minRole: "employee" },
+  { id: "dashboard", label: "Accueil", icon: LayoutDashboard },
+  { id: "invoices", label: "Factures", icon: ReceiptText },
+  { id: "new-invoice", label: "Nouvelle", icon: PlusCircle },
+  { id: "stats", label: "Stats", icon: BarChart3 },
 ];
 
 // Context for navigating between views + passing params (e.g. selected invoice id)
@@ -86,7 +91,7 @@ export function AppShell({
   children: React.ReactNode;
   maintenanceMode: boolean;
 }) {
-  const { user, loading, logout } = useAuth();
+  const { user, loading, logout, refresh } = useAuth();
   const [view, setView] = useState<ViewId>("dashboard");
   const [params, setParams] = useState<Record<string, any>>({});
 
@@ -111,7 +116,7 @@ export function AppShell({
 
   // Global keyboard shortcuts (only when authenticated, not in inputs)
   useEffect(() => {
-    if (!user || user.role === "client") return;
+    if (!user || user.role !== "client") return;
     const onKey = (e: KeyboardEvent) => {
       // Skip when typing in inputs/textarea/contenteditable
       const t = e.target as HTMLElement;
@@ -120,11 +125,6 @@ export function AppShell({
       }
       // Skip with modifier keys
       if (e.metaKey || e.ctrlKey || e.altKey) return;
-
-      const roleOk = (min: UserRole) => {
-        const order: Record<UserRole, number> = { client: 0, employee: 1, admin: 2 };
-        return order[user.role as UserRole] >= order[min];
-      };
 
       if (e.key === "n") {
         e.preventDefault();
@@ -141,14 +141,12 @@ export function AppShell({
           window.removeEventListener("keydown", handler);
           if (ev.key === "d") navigate("dashboard");
           else if (ev.key === "i") navigate("invoices");
-          else if (ev.key === "c" && roleOk("employee")) navigate("clients");
-          else if (ev.key === "s" && roleOk("employee")) navigate("stats");
-          else if (ev.key === "p" && roleOk("employee")) navigate("products");
+          else if (ev.key === "c") navigate("clients");
+          else if (ev.key === "s") navigate("stats");
+          else if (ev.key === "p") navigate("products");
         };
         window.addEventListener("keydown", handler, { once: true });
         setTimeout(() => window.removeEventListener("keydown", handler), 800);
-      } else if (e.key === "?") {
-        // Show shortcuts help via toast handled elsewhere — just prevent default scroll
       }
     };
     window.addEventListener("keydown", onKey);
@@ -167,37 +165,40 @@ export function AppShell({
     return <LoginScreen />;
   }
 
-  // Maintenance gate: non-admin visitors see the closed screen
-  if (maintenanceMode && user.role !== "admin") {
+  // === GARDE-FOU : compte client non approuvé ou abonnement non actif ===
+  // Aucun accès aux données métier tant que le compte n'est pas validé.
+  // (Le serveur revérifie systématiquement via requireActiveClient.)
+  if (user.role === "client" && (!user.isApproved || user.subscriptionStatus !== "active")) {
+    return <PendingApprovalScreen user={user} onLogout={logout} onRefresh={refresh} />;
+  }
+
+  // Maintenance gate: non-superadmin visitors see the closed screen
+  if (maintenanceMode && user.role !== "superadmin") {
     return <MaintenanceScreen onLogout={logout} />;
   }
 
-  // Clients have no business data access — show a friendly restricted screen
-  if (user.role === "client") {
-    return <ClientRestrictedScreen onLogout={logout} />;
-  }
-
-  const roleOrder: Record<UserRole, number> = { client: 0, employee: 1, admin: 2 };
-  const visibleNav = NAV_ITEMS.filter((n) => roleOrder[user.role] >= roleOrder[n.minRole]);
-  const visibleMobile = MOBILE_NAV.filter((n) => roleOrder[user.role] >= roleOrder[n.minRole]);
+  const visibleNav = NAV_ITEMS.filter((n) =>
+    n.superadminOnly ? user.role === "superadmin" : user.role === "client"
+  );
+  const visibleMobile = MOBILE_NAV;
 
   return (
     <NavContext.Provider value={{ view, params, navigate }}>
       <div className="min-h-screen flex flex-col bg-slate-50">
         <OfflineBanner />
-        {/* Permanent mode indicator — impossible to confuse admin vs employee */}
-        {user.role === "admin" ? (
+        {/* Bandeau de mode permanent — clair et impossible à confondre */}
+        {user.role === "superadmin" ? (
           <div className="bg-gradient-to-r from-purple-600 via-purple-700 to-indigo-700 text-white text-[11px] font-bold tracking-wider px-4 py-1.5 flex items-center justify-center gap-2 uppercase">
             <ShieldCheck className="w-3.5 h-3.5" />
-            Mode Administrateur — Accès total
+            Superadmin — Gestion de la plateforme
             <button onClick={logout} aria-label="Se déconnecter" className="md:hidden ml-2 p-1 rounded hover:bg-white/20">
               <LogOut className="w-4 h-4" />
             </button>
           </div>
         ) : (
-          <div className="bg-emerald-600 text-white text-[11px] font-bold tracking-wider px-4 py-1.5 flex items-center justify-center gap-2 uppercase">
-            <Briefcase className="w-3.5 h-3.5" />
-            Mode Employé — Factures & Clients
+          <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white text-[11px] font-bold tracking-wider px-4 py-1.5 flex items-center justify-center gap-2 uppercase">
+            <Store className="w-3.5 h-3.5" />
+            Espace Boutique
             <button onClick={logout} aria-label="Se déconnecter" className="md:hidden ml-2 p-1 rounded hover:bg-white/20">
               <LogOut className="w-4 h-4" />
             </button>
@@ -329,32 +330,6 @@ function MaintenanceScreen({ onLogout }: { onLogout: () => void }) {
         <p className="text-slate-500 mb-8 leading-relaxed">
           Le service est temporairement indisponible pour maintenance.
           Veuillez réessayer plus tard.
-        </p>
-        <button
-          onClick={onLogout}
-          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-medium hover:bg-slate-800"
-        >
-          <LogOut className="w-4 h-4" /> Se déconnecter
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function ClientRestrictedScreen({ onLogout }: { onLogout: () => void }) {
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
-      <div className="max-w-md w-full text-center">
-        <div className="w-24 h-24 mx-auto rounded-full bg-slate-100 flex items-center justify-center mb-6">
-          <ShieldAlert className="w-12 h-12 text-slate-400" />
-        </div>
-        <h1 className="text-2xl font-extrabold text-slate-900 mb-3">
-          Accès limité
-        </h1>
-        <p className="text-slate-500 mb-8 leading-relaxed">
-          Votre compte a le rôle « client ». Vous n'avez pas accès à la gestion
-          des factures. Contactez un administrateur si vous pensez qu'il s'agit
-          d'une erreur.
         </p>
         <button
           onClick={onLogout}

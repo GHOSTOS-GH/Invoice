@@ -1,21 +1,14 @@
-// Root page — checks maintenance mode server-side, then renders the app shell.
-import { db } from "@/lib/db";
-import { AppShell, type ViewId } from "@/components/app-shell";
+// Root page — renders the app shell. Le garde d'accès (compte non approuvé,
+// abonnement inactif, maintenance) est appliqué côté client dans AppShell et
+// côté serveur dans chaque route API (requireActiveClient / requireSuperadmin).
+import { AppShell } from "@/components/app-shell";
 import { ViewRouter } from "@/components/view-router";
 
 export const dynamic = "force-dynamic";
 
-export default async function Home() {
-  let maintenanceMode = false;
-  try {
-    let settings = await db.settings.findUnique({ where: { id: "singleton" } });
-    maintenanceMode = settings?.maintenanceMode ?? false;
-  } catch {
-    maintenanceMode = false;
-  }
-
+export default function Home() {
   return (
-    <AppShell maintenanceMode={maintenanceMode}>
+    <AppShell maintenanceMode={false}>
       <ViewRouter />
     </AppShell>
   );

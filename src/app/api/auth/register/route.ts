@@ -63,7 +63,13 @@ export async function POST(req: NextRequest) {
       phone: user.phone,
       role: user.role as any,
       name: user.name,
-    });
+      disabled: user.disabled,
+      isApproved: user.isApproved,
+      subscriptionStatus: user.subscriptionStatus as any,
+      paymentClaimedAt: user.paymentClaimedAt
+        ? user.paymentClaimedAt.toISOString()
+        : null,
+    } as any);
     await setSessionCookie(token);
     return Response.json({
       user: {

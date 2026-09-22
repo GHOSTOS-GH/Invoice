@@ -33,19 +33,18 @@ export async function PUT(
     const user = await requireActiveClient();
     const { id } = await params;
     const body = await req.json();
+    // Upsert : nécessaire au mode hors ligne (l'id peut être généré localement).
+    // On ne peut jamais réattacher un client d'un autre compte (createdBy forcé).
     const existing = await db.client.findFirst({ where: { id, createdBy: user.id } });
-    if (!existing) {
-      return Response.json({ error: "Client introuvable" }, { status: 404 });
-    }
-    const updated = await db.client.update({
-      where: { id },
-      data: {
-        name: body.name?.trim() ?? existing.name,
-        phone: body.phone?.trim() ?? existing.phone,
-        address: body.address?.trim() ?? existing.address,
-        updatedAt: new Date(),
-      },
-    });
+    const data = {
+      name: body.name?.trim() || existing?.name || "",
+      phone: body.phone?.trim() ?? existing?.phone ?? null,
+      address: body.address?.trim() ?? existing?.address ?? null,
+      updatedAt: new Date(),
+    };
+    const updated = existing
+      ? await db.client.update({ where: { id }, data })
+      : await db.client.create({ data: { id, ...data, createdBy: user.id } });
     return Response.json(updated);
   } catch (err) {
     return authErrorResponse(err);

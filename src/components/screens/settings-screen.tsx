@@ -1,11 +1,8 @@
 "use client";
-// Settings screen — reproduces settings_screen.dart + receipt settings:
-// tabbed UI with Boutique info, Maintenance mode, Comptes (UsersScreen) and
-// Sauvegarde (CSV export, JSON backup, CSV import shortcut).
+// Settings screen — onglets : Boutique, Maintenance, Application (installation
+// PWA, cache local) et Sauvegarde (CSV export, JSON backup, import CSV).
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import dynamic from "next/dynamic";
-import { Component, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   useSettings,
   updateSettings,
@@ -14,8 +11,9 @@ import {
   useClients,
   uploadImage,
 } from "@/lib/data-hooks";
-import { clearAllLocal, countPendingSync, getDB } from "@/lib/offline-db";
+import { clearAllLocal, countPendingLocal, getDB, setMeta } from "@/lib/offline-db";
 import { useSyncStatus } from "@/components/shared/sync-status";
+import { usePwaInstall } from "@/components/pwa/use-pwa-install";
 import { useNav } from "@/components/app-shell";
 import {
   ScreenHeader,
@@ -27,25 +25,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Switch } from "@/components/ui/switch";
 import {
   Tabs,
   TabsList,
   TabsTrigger,
   TabsContent,
 } from "@/components/ui/tabs";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import {
   Settings,
   Store,
-  Wrench,
   Users,
   Database,
   Download,
@@ -56,8 +45,8 @@ import {
   ImageUp,
   Loader2,
   FileJson,
-  HardHat,
-  ShieldAlert,
+  Smartphone,
+  CheckCircle2,
 } from "lucide-react";
 import {
   INVOICE_STATUS_META,
@@ -75,46 +64,6 @@ import { invoiceTotal } from "@/lib/types";
 import type { Settings as SettingsType } from "@/lib/types";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-
-// Lazy-load the UsersScreen so the Comptes tab doesn't break the whole
-// settings screen if the module is not yet present at build time.
-const LazyUsersScreen = dynamic(
-  () =>
-    import("@/components/screens/users-screen").then((m) => m.UsersScreen),
-  {
-    ssr: false,
-    loading: () => <LoadingState message="Chargement des comptes…" />,
-  }
-);
-
-class UsersTabBoundary extends Component<
-  { children: ReactNode },
-  { failed: boolean }
-> {
-  state = { failed: false };
-  static getDerivedStateFromError() {
-    return { failed: true };
-  }
-  componentDidCatch() {
-    // swallow — the fallback note will be shown
-  }
-  render() {
-    if (this.state.failed) return <ComptesNote />;
-    return this.props.children;
-  }
-}
-
-function ComptesNote() {
-  return (
-    <SectionCard title="Comptes utilisateurs">
-      <EmptyState
-        icon={Users}
-        title="Voir l'onglet Comptes"
-        description="La gestion des comptes est accessible depuis le menu « Comptes » de la barre latérale (réservé aux administrateurs)."
-      />
-    </SectionCard>
-  );
-}
 
 // ---------- Main screen ----------
 
@@ -153,12 +102,11 @@ export function SettingsScreen() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <ScreenHeader
-        title="Réglages"
-        subtitle="Boutique · maintenance · comptes · sauvegarde"
-        icon={Settings}
-      />
+    <div className="min-h-screen flex flex-col">        <ScreenHeader
+          title="Réglages"
+          subtitle="Boutique · maintenance · application · sauvegarde"
+          icon={Settings}
+        />
       <div className="flex-1 px-4 sm:px-6 py-4 sm:py-6 max-w-4xl w-full mx-auto">
         <Tabs value={tab} onValueChange={setTab} className="gap-4">
           <TabsList className="bg-slate-100/80 p-1 h-auto rounded-2xl w-full overflow-x-auto flex justify-start sm:justify-center">
@@ -170,18 +118,11 @@ export function SettingsScreen() {
               <span className="hidden sm:inline">Boutique</span>
             </TabsTrigger>
             <TabsTrigger
-              value="maintenance"
+              value="application"
               className="rounded-xl px-3 py-2 data-[state=active]:bg-white data-[state=active]:text-[#2563EB] data-[state=active]:shadow-sm text-slate-600"
             >
-              <Wrench className="w-4 h-4" />
-              <span className="hidden sm:inline">Maintenance</span>
-            </TabsTrigger>
-            <TabsTrigger
-              value="comptes"
-              className="rounded-xl px-3 py-2 data-[state=active]:bg-white data-[state=active]:text-[#2563EB] data-[state=active]:shadow-sm text-slate-600"
-            >
-              <Users className="w-4 h-4" />
-              <span className="hidden sm:inline">Comptes</span>
+              <Smartphone className="w-4 h-4" />
+              <span className="hidden sm:inline">Application</span>
             </TabsTrigger>
             <TabsTrigger
               value="sauvegarde"
@@ -195,13 +136,8 @@ export function SettingsScreen() {
           <TabsContent value="boutique" className="mt-0 outline-none">
             <BoutiqueTab settings={settings} />
           </TabsContent>
-          <TabsContent value="maintenance" className="mt-0 outline-none">
-            <MaintenanceTab settings={settings} />
-          </TabsContent>
-          <TabsContent value="comptes" className="mt-0 outline-none">
-            <UsersTabBoundary>
-              <LazyUsersScreen />
-            </UsersTabBoundary>
+          <TabsContent value="application" className="mt-0 outline-none">
+            <ApplicationTab />
           </TabsContent>
           <TabsContent value="sauvegarde" className="mt-0 outline-none">
             <SauvegardeTab />
@@ -433,21 +369,18 @@ function BoutiqueTab({ settings }: { settings: SettingsType }) {
   );
 }
 
-// ---------- Tab 2: Maintenance ----------
+// ---------- Tab 2: Application (PWA + outils locaux) ----------
 
-function MaintenanceTab({ settings }: { settings: SettingsType }) {
+function ApplicationTab() {
   const { forceSync } = useSyncStatus();
-  const [maintenanceMode, setMaintenanceMode] = useState(
-    settings.maintenanceMode || false
-  );
-  const [saving, setSaving] = useState(false);
+  const { canInstall, promptInstall, isInstalled } = usePwaInstall();
   const [pendingCount, setPendingCount] = useState(0);
   const [cacheCount, setCacheCount] = useState(0);
   const [syncMessage, setSyncMessage] = useState("");
   const [forcingSync, setForcingSync] = useState(false);
 
   const refreshLocalCounts = async () => {
-    setPendingCount(await countPendingSync());
+    setPendingCount(await countPendingLocal());
     try {
       const db = getDB();
       const counts = await Promise.all([db.invoices.count(), db.clients.count(), db.products.count()]);
@@ -464,24 +397,29 @@ function MaintenanceTab({ settings }: { settings: SettingsType }) {
   }, []);
 
   const clearPending = async () => {
-    if (!window.confirm("Vider définitivement les synchronisations en attente ?")) return;
+    if (!window.confirm("Abandonner les données locales non sauvegardées en ligne ? Elles seront définitivement perdues.")) return;
     try {
-      await getDB().syncQueue.clear();
+      await getDB().invoices.where("syncState").equals("local").modify({ syncState: "saved" });
+      await getDB().clients.where("syncState").equals("local").modify({ syncState: "saved" });
+      await getDB().products.where("syncState").equals("local").modify({ syncState: "saved" });
+      await setMeta("tombstones", []);
       await refreshLocalCounts();
-      toast.success("Synchronisation en attente vidée");
+      toast.success("Données locales marquées comme sauvegardées");
     } catch {
-      toast.error("Impossible de vider la synchronisation");
+      toast.error("Impossible de vider les données locales");
     }
   };
 
   const forcePendingSync = async () => {
     setForcingSync(true);
     const results = await forceSync();
-    const failed = results.filter((result) => !result.ok);
-    setSyncMessage(results.length === 0
-      ? "Aucun élément traité. Vérifiez la connexion et la session."
-      : `${results.length - failed.length} succès, ${failed.length} échec(s)${failed[0] ? ` : ${failed[0].message}` : ""}`);
+    setSyncMessage(
+      results.ok === 0 && results.failed === 0
+        ? "Aucun élément à envoyer. Vérifiez la connexion et la session."
+        : `${results.ok} succès, ${results.failed} échec(s)${results.message ? ` : ${results.message}` : ""}`
+    );
     await refreshLocalCounts();
+    window.dispatchEvent(new Event("invoice-sync-request"));
     setForcingSync(false);
   };
 
@@ -491,164 +429,74 @@ function MaintenanceTab({ settings }: { settings: SettingsType }) {
     window.location.reload();
   };
 
-  useEffect(() => {
-    setMaintenanceMode(!!settings.maintenanceMode);
-  }, [settings.maintenanceMode]);
-
-  const handleToggle = async (checked: boolean) => {
-    setMaintenanceMode(checked);
-    setSaving(true);
-    try {
-      await updateSettings({ maintenanceMode: checked });
-      toast.success(
-        checked
-          ? "Mode maintenance activé"
-          : "Mode maintenance désactivé"
-      );
-    } catch (err: any) {
-      // Revert on failure
-      setMaintenanceMode(!checked);
-      toast.error(err?.message || "Échec de la mise à jour");
-    } finally {
-      setSaving(false);
-    }
-  };
-
   return (
     <div className="space-y-4">
-      <div
-        className={cn(
-          "rounded-2xl border p-5 sm:p-6 transition-colors",
-          maintenanceMode
-            ? "border-red-200 bg-red-50/60"
-            : "border-slate-200 bg-white"
-        )}
-      >
+      <SectionCard title="Installation de l'application">
         <div className="flex items-start gap-4">
-          <div
-            className={cn(
-              "w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 transition-colors",
-              maintenanceMode
-                ? "bg-red-100 text-red-600"
-                : "bg-slate-100 text-slate-400"
-            )}
-          >
-            <HardHat className="w-6 h-6" />
+          <div className="w-12 h-12 rounded-2xl bg-[#2563EB]/10 flex items-center justify-center shrink-0">
+            <Smartphone className="w-6 h-6 text-[#2563EB]" />
           </div>
           <div className="flex-1 min-w-0">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h3 className="text-[15px] font-bold text-slate-900">
-                  Mode maintenance
-                </h3>
-                <p className="text-[12.5px] text-slate-500 mt-0.5">
-                  Restreint l'accès aux administrateurs uniquement.
-                </p>
-              </div>
+            {isInstalled ? (
               <div className="flex items-center gap-2">
-                {saving && (
-                  <Loader2 className="w-4 h-4 animate-spin text-slate-400" />
-                )}
-                <span
-                  className={cn(
-                    "text-[12px] font-semibold px-2.5 py-1 rounded-full transition-colors",
-                    maintenanceMode
-                      ? "bg-red-100 text-red-700"
-                      : "bg-slate-100 text-slate-500"
-                  )}
-                >
-                  {maintenanceMode ? "ACTIF" : "Inactif"}
-                </span>
-                {/* Large custom switch with red accent when ON */}
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={maintenanceMode}
-                  onClick={() => handleToggle(!maintenanceMode)}
-                  disabled={saving}
-                  className={cn(
-                    "relative inline-flex h-7 w-12 items-center rounded-full transition-colors outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-red-400 disabled:opacity-60",
-                    maintenanceMode ? "bg-red-600" : "bg-slate-300"
-                  )}
-                >
-                  <span
-                    className={cn(
-                      "inline-block h-5 w-5 rounded-full bg-white shadow transform transition-transform",
-                      maintenanceMode ? "translate-x-6" : "translate-x-1"
-                    )}
-                  />
-                </button>
+                <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+                <div>
+                  <p className="text-[14px] font-semibold text-slate-900">Application installée</p>
+                  <p className="text-[12.5px] text-slate-500">
+                    Vous utilisez déjà l'application en plein écran.
+                  </p>
+                </div>
               </div>
-            </div>
+            ) : canInstall ? (
+              <>
+                <p className="text-[14px] font-semibold text-slate-900">Installer sur votre appareil</p>
+                <p className="text-[12.5px] text-slate-500 mt-0.5 leading-relaxed">
+                  Ajoutez l'application à votre écran d'accueil pour un accès
+                  rapide et le fonctionnement hors ligne.
+                </p>
+                <Button
+                  onClick={promptInstall}
+                  className="mt-3 rounded-xl bg-[#2563EB] hover:bg-[#1D4ED8] text-white"
+                  size="sm"
+                >
+                  <Download className="w-4 h-4 mr-1.5" /> Installer l'application
+                </Button>
+              </>
+            ) : (
+              <>
+                <p className="text-[14px] font-semibold text-slate-900">Installation manuelle</p>
+                <p className="text-[12.5px] text-slate-500 mt-0.5 leading-relaxed">
+                  <strong className="text-slate-700">Android / Chrome</strong> : menu ⋮ → « Installer l'application ».
+                  <br />
+                  <strong className="text-slate-700">iPhone / Safari</strong> : bouton Partager → « Sur l'écran d'accueil ».
+                </p>
+              </>
+            )}
           </div>
         </div>
-      </div>
-
-      {maintenanceMode && (
-        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 sm:p-5">
-          <div className="flex items-start gap-3">
-            <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-            <div>
-              <p className="text-[13.5px] font-semibold text-amber-800">
-                Site en maintenance
-              </p>
-              <p className="text-[13px] text-amber-700 mt-1 leading-relaxed">
-                Le site est actuellement en mode maintenance. Seuls les
-                administrateurs peuvent y accéder.
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <SectionCard title="Comportement">
-        <ul className="space-y-2.5 text-[13px] text-slate-600">
-          <li className="flex items-start gap-2">
-            <ShieldAlert className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
-            <span>
-              Les utilisateurs non-administrateurs voient un écran « Site
-              actuellement fermé » et ne peuvent pas se connecter à l'espace
-              de gestion.
-            </span>
-          </li>
-          <li className="flex items-start gap-2">
-            <ShieldAlert className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
-            <span>
-              Les administrateurs conservent un accès complet pour tester,
-              corriger ou préparer une mise à jour.
-            </span>
-          </li>
-          <li className="flex items-start gap-2">
-            <ShieldAlert className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
-            <span>
-              Désactivez le mode maintenance une fois les opérations terminées
-              pour rendre l'application à nouveau disponible.
-            </span>
-          </li>
-        </ul>
       </SectionCard>
 
-      <SectionCard title="Outils de maintenance">
+      <SectionCard title="Données locales">
         <div className="space-y-3">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <p className="text-[13px] font-semibold text-slate-800">Vider la synchronisation en attente</p>
-              <p className="text-[12px] text-slate-500">{pendingCount} élément{pendingCount !== 1 ? "s" : ""} en attente</p>
+              <p className="text-[13px] font-semibold text-slate-800">Envoi direct au serveur</p>
+              <p className="text-[12px] text-slate-500">Réessaie l'envoi des données enregistrées localement.</p>
             </div>
-            <Button variant="outline" size="sm" onClick={clearPending} disabled={pendingCount === 0}>Vider</Button>
-          </div>
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-[13px] font-semibold text-slate-800">Forcer la synchronisation maintenant</p>
-              <p className="text-[12px] text-slate-500">Réessaie chaque élément et conserve les échecs.</p>
-            </div>
-            <Button variant="outline" size="sm" onClick={forcePendingSync} disabled={forcingSync || pendingCount === 0}>{forcingSync ? "Synchronisation…" : "Synchroniser"}</Button>
+            <Button variant="outline" size="sm" onClick={forcePendingSync} disabled={forcingSync || pendingCount === 0}>{forcingSync ? "Envoi…" : "Réessayer"}</Button>
           </div>
           {syncMessage && <p className="text-[12px] text-slate-600 rounded-lg bg-slate-50 p-2">{syncMessage}</p>}
           <div className="flex items-center justify-between gap-3">
             <div>
+              <p className="text-[13px] font-semibold text-slate-800">Abandonner les données non sauvegardées</p>
+              <p className="text-[12px] text-slate-500">{pendingCount} donnée{pendingCount !== 1 ? "s" : ""} uniquement locale{pendingCount !== 1 ? "s" : ""}</p>
+            </div>
+            <Button variant="outline" size="sm" onClick={clearPending} disabled={pendingCount === 0}>Abandonner</Button>
+          </div>
+          <div className="flex items-center justify-between gap-3">
+            <div>
               <p className="text-[13px] font-semibold text-slate-800">Réinitialiser le cache local</p>
-              <p className="text-[12px] text-slate-500">{cacheCount} donnée{cacheCount !== 1 ? "s" : ""} locale{cacheCount !== 1 ? "s" : ""}</p>
+              <p className="text-[12px] text-slate-500">{cacheCount} donnée{cacheCount !== 1 ? "s" : ""} en cache local{cacheCount !== 1 ? "s" : ""}</p>
             </div>
             <Button variant="outline" size="sm" onClick={resetCache} disabled={cacheCount === 0}>Réinitialiser</Button>
           </div>
@@ -658,7 +506,7 @@ function MaintenanceTab({ settings }: { settings: SettingsType }) {
   );
 }
 
-// ---------- Tab 4: Sauvegarde ----------
+// ---------- Tab 3: Sauvegarde ----------
 
 function SauvegardeTab() {
   const { invoices } = useInvoices();

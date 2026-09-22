@@ -24,7 +24,6 @@ import {
   BarChart3,
   ShieldCheck,
   Settings as SettingsIcon,
-  Upload,
 } from "lucide-react";
 import {
   INVOICE_STATUS_META,
@@ -189,13 +188,20 @@ export function DashboardScreen() {
           </div>
         </div>
 
-        {/* Admin icon tiles — large clickable cards for admin-only screens */}
-        {user?.role === "admin" && (
+        {/* Tuiles plateforme — visibles uniquement par le superadmin */}
+        {user?.role === "superadmin" && (
           <div>
             <h3 className="text-[15px] font-bold text-slate-900 mb-3 flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-purple-600" /> Espace Administration
+              <ShieldCheck className="w-4 h-4 text-purple-600" /> Plateforme
             </h3>
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+              <AdminTile
+                icon={ShieldCheck}
+                label="Comptes"
+                description="Gérer les boutiques"
+                color="#7C3AED"
+                onClick={() => navigate("superadmin")}
+              />
               <AdminTile
                 icon={BarChart3}
                 label="Statistiques"
@@ -204,32 +210,11 @@ export function DashboardScreen() {
                 onClick={() => navigate("stats")}
               />
               <AdminTile
-                icon={Package}
-                label="Produits"
-                description="Catalogue"
-                color="#D97706"
-                onClick={() => navigate("products")}
-              />
-              <AdminTile
-                icon={Users}
-                label="Comptes"
-                description="Utilisateurs"
-                color="#2563EB"
-                onClick={() => navigate("users")}
-              />
-              <AdminTile
                 icon={SettingsIcon}
                 label="Réglages"
                 description="Boutique & maintenance"
                 color="#DB2777"
                 onClick={() => navigate("settings")}
-              />
-              <AdminTile
-                icon={Upload}
-                label="Import CSV"
-                description="Importer des factures"
-                color="#16A34A"
-                onClick={() => navigate("csv-import")}
               />
             </div>
           </div>

@@ -1,6 +1,6 @@
 "use client";
-// Tracks online/offline status + pending sync count, exposes via context.
-// Also starts the sync engine on mount.
+// Tracks online/offline status + pending local-only count, exposes via context.
+// Also starts the (simplified) sync engine on mount.
 
 import {
   createContext,
@@ -9,15 +9,15 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { subscribeSync, startSyncEngine, pullFromServer, flushQueue, type SyncAttemptResult } from "@/lib/sync-engine";
-import { countPendingSync } from "@/lib/offline-db";
+import { subscribeSync, startSyncEngine, pullFromServer, retryPendingSync } from "@/lib/sync-engine";
+import { countPendingLocal } from "@/lib/offline-db";
 
 interface SyncStatus {
   online: boolean;
   pending: number;
-  syncing: boolean;
+  retrying: boolean;
   refresh: () => void;
-  forceSync: () => Promise<SyncAttemptResult[]>;
+  forceSync: () => Promise<{ ok: number; failed: number; message?: string }>;
 }
 
 const Ctx = createContext<SyncStatus | null>(null);
@@ -27,7 +27,7 @@ export function SyncStatusProvider({ children }: { children: ReactNode }) {
     typeof navigator !== "undefined" ? navigator.onLine : true
   );
   const [pending, setPending] = useState(0);
-  const [syncing, setSyncing] = useState(false);
+  const [retrying, setRetrying] = useState(false);
 
   useEffect(() => {
     const onOnline = () => {
@@ -39,11 +39,11 @@ export function SyncStatusProvider({ children }: { children: ReactNode }) {
     window.addEventListener("offline", onOffline);
 
     startSyncEngine();
-    const unsub = subscribeSync((p, s) => {
+    const unsub = subscribeSync((p, r) => {
       setPending(p);
-      setSyncing(s);
+      setRetrying(r);
     });
-    countPendingSync().then(setPending);
+    countPendingLocal().then(setPending);
 
     return () => {
       window.removeEventListener("online", onOnline);
@@ -53,17 +53,17 @@ export function SyncStatusProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const refresh = () => {
-    countPendingSync().then(setPending);
+    countPendingLocal().then(setPending);
   };
 
   const forceSync = async () => {
-    const results = await flushQueue();
+    const results = await retryPendingSync();
     refresh();
     return results;
   };
 
   return (
-    <Ctx.Provider value={{ online, pending, syncing, refresh, forceSync }}>
+    <Ctx.Provider value={{ online, pending, retrying, refresh, forceSync }}>
       {children}
     </Ctx.Provider>
   );

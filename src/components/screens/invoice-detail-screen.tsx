@@ -171,7 +171,7 @@ export function InvoiceDetailScreen({ invoiceId }: { invoiceId?: string }) {
     try {
       const html2canvas = (await import("html2canvas")).default;
       const canvas = await html2canvas(invoiceRef.current, {
-        scale: 2,
+        scale: 3,
         backgroundColor: "#ffffff",
         useCORS: true,
         logging: false,
@@ -197,13 +197,29 @@ export function InvoiceDetailScreen({ invoiceId }: { invoiceId?: string }) {
     if (!invoiceRef.current) throw new Error("Facture non disponible");
     const html2canvas = (await import("html2canvas")).default;
     const canvas = await html2canvas(invoiceRef.current, {
-      scale: 2,
+      scale: 3,
       backgroundColor: "#ffffff",
       useCORS: true,
       logging: false,
+      // Marges propres autour du document capturé, sans éléments d'interface
+      width: invoiceRef.current.offsetWidth,
+      height: invoiceRef.current.offsetHeight,
+      windowWidth: invoiceRef.current.scrollWidth,
+      windowHeight: invoiceRef.current.scrollHeight,
+      onclone: (doc) => {
+        // Capture du document seul : on neutralise ombres/bordures d'UI du conteneur
+        const el = doc.getElementById("invoice-capture-root");
+        if (el) {
+          el.style.border = "none";
+          el.style.boxShadow = "none";
+          el.style.borderRadius = "0";
+          el.style.padding = "32px";
+          el.style.background = "#ffffff";
+        }
+      },
     });
     return new Promise<Blob>((resolve, reject) => {
-      canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("Conversion image échouée"))), type, type === "image/jpeg" ? 0.92 : undefined);
+      canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("Conversion image échouée"))), type, type === "image/jpeg" ? 0.95 : undefined);
     });
   };
 
@@ -399,8 +415,13 @@ export function InvoiceDetailScreen({ invoiceId }: { invoiceId?: string }) {
           </button>
         </div>
 
-        {/* Printable invoice (also used for PNG capture) */}
-        <div ref={invoiceRef} className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-7">
+        {/* Printable invoice (also used for PNG/JPG capture) — id utilisé par
+            html2canvas pour retirer bordures/ombres d'interface de la capture */}
+        <div
+          ref={invoiceRef}
+          id="invoice-capture-root"
+          className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-7"
+        >
           <InvoicePrintable invoice={invoice} />
         </div>
       </div>
@@ -423,15 +444,43 @@ export function InvoiceDetailScreen({ invoiceId }: { invoiceId?: string }) {
         </AlertDialogContent>
       </AlertDialog>
       <AlertDialog open={shareChoiceOpen} onOpenChange={setShareChoiceOpen}>
-        <AlertDialogContent>
+        <AlertDialogContent className="rounded-2xl">
           <AlertDialogHeader>
-            <AlertDialogTitle>Choisir le format de partage</AlertDialogTitle>
-            <AlertDialogDescription>Choisissez le fichier à envoyer.</AlertDialogDescription>
+            <AlertDialogTitle>Partager la facture</AlertDialogTitle>
+            <AlertDialogDescription>
+              Choisissez le format à envoyer à votre client.
+            </AlertDialogDescription>
           </AlertDialogHeader>
+          <div className="grid grid-cols-2 gap-3 py-1">
+            <button
+              onClick={() => shareAs("pdf")}
+              disabled={generating !== null}
+              className="flex flex-col items-center gap-2 rounded-2xl border border-slate-200 py-6 hover:border-[#2563EB] hover:bg-blue-50/60 transition-all disabled:opacity-50"
+            >
+              {generating === "pdf" ? (
+                <Loader2 className="w-7 h-7 text-[#2563EB] animate-spin" />
+              ) : (
+                <FileText className="w-7 h-7 text-[#2563EB]" />
+              )}
+              <span className="text-[13px] font-semibold text-slate-800">PDF</span>
+              <span className="text-[11px] text-slate-400 -mt-1.5">document vectoriel</span>
+            </button>
+            <button
+              onClick={() => shareAs("jpg")}
+              disabled={generating !== null}
+              className="flex flex-col items-center gap-2 rounded-2xl border border-slate-200 py-6 hover:border-[#2563EB] hover:bg-blue-50/60 transition-all disabled:opacity-50"
+            >
+              {generating === "jpg" ? (
+                <Loader2 className="w-7 h-7 text-[#2563EB] animate-spin" />
+              ) : (
+                <ImageIcon className="w-7 h-7 text-[#2563EB]" />
+              )}
+              <span className="text-[13px] font-semibold text-slate-800">Image</span>
+              <span className="text-[11px] text-slate-400 -mt-1.5">photo JPG haute définition</span>
+            </button>
+          </div>
           <AlertDialogFooter>
             <AlertDialogCancel>Annuler</AlertDialogCancel>
-            <AlertDialogAction onClick={() => shareAs("pdf")}>Partager en PDF</AlertDialogAction>
-            <AlertDialogAction onClick={() => shareAs("jpg")} className="bg-slate-700 hover:bg-slate-800">Partager en image (JPG)</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

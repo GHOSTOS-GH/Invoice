@@ -13,21 +13,20 @@ export async function PUT(
     const user = await requireActiveClient();
     const { id } = await params;
     const body = await req.json();
+    // Upsert : nécessaire au mode hors ligne (l'id peut être généré localement).
+    // On ne peut jamais réattacher un produit d'un autre compte (createdBy forcé).
     const existing = await db.product.findFirst({
       where: { id, createdBy: user.id },
     });
-    if (!existing) {
-      return Response.json({ error: "Produit introuvable" }, { status: 404 });
-    }
-    const updated = await db.product.update({
-      where: { id },
-      data: {
-        name: body.name?.trim() ?? existing.name,
-        category: body.category?.trim() ?? existing.category,
-        imageUrl: body.imageUrl ?? existing.imageUrl,
-        updatedAt: new Date(),
-      },
-    });
+    const data = {
+      name: body.name?.trim() || existing?.name || "",
+      category: body.category?.trim() || existing?.category || "Divers",
+      imageUrl: body.imageUrl ?? existing?.imageUrl ?? null,
+      updatedAt: new Date(),
+    };
+    const updated = existing
+      ? await db.product.update({ where: { id }, data })
+      : await db.product.create({ data: { id, ...data, createdBy: user.id } });
     return Response.json(updated);
   } catch (err) {
     return authErrorResponse(err);

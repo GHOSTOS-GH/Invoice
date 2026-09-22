@@ -7,13 +7,13 @@ import { InvoicesScreen } from "@/components/screens/invoices-screen";
 import { NewInvoiceScreen } from "@/components/screens/new-invoice-screen";
 import { InvoiceDetailScreen } from "@/components/screens/invoice-detail-screen";
 import { ClientsScreen } from "@/components/screens/clients-screen";
-import { UsersScreen } from "@/components/screens/users-screen";
 import dynamic from "next/dynamic";
 
 const ProductsScreen = dynamic(() => import("@/components/screens/products-screen").then((m) => m.ProductsScreen));
 const StatsScreen = dynamic(() => import("@/components/screens/stats-screen").then((m) => m.StatsScreen));
 const SettingsScreen = dynamic(() => import("@/components/screens/settings-screen").then((m) => m.SettingsScreen));
 const CsvImportScreen = dynamic(() => import("@/components/screens/csv-import-screen").then((m) => m.CsvImportScreen));
+const SuperadminScreen = dynamic(() => import("@/components/screens/superadmin-screen").then((m) => m.SuperadminScreen));
 
 export function ViewRouter() {
   const { view, params } = useNav();
@@ -37,8 +37,8 @@ export function ViewRouter() {
       return <SettingsScreen />;
     case "csv-import":
       return <CsvImportScreen />;
-    case "users":
-      return <UsersScreen />;
+    case "superadmin":
+      return <SuperadminScreen />;
     default:
       return <DashboardScreen />;
   }

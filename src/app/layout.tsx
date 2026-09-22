@@ -3,6 +3,7 @@ import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
 import { AuthProvider } from "@/lib/auth-context";
 import { ServiceWorkerRegister } from "@/components/pwa/sw-register";
+import { PwaInstallBanner } from "@/components/pwa/install-banner";
 import { SyncStatusProvider } from "@/components/shared/sync-status";
 
 export const metadata: Metadata = {
@@ -60,6 +61,7 @@ export default function RootLayout({
             {children}
             <Toaster />
             <ServiceWorkerRegister />
+            <PwaInstallBanner />
           </SyncStatusProvider>
         </AuthProvider>
       </body>
